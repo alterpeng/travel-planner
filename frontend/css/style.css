@@ -1116,6 +1116,36 @@ html, body {
     color: var(--text-lighter);
 }
 
+.hotel-price .price-live {
+    font-size: var(--font-sm);
+    white-space: nowrap;
+}
+
+.price-check-links {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-top: 6px;
+}
+
+.price-check-links a {
+    display: inline-flex;
+    align-items: center;
+    min-height: 30px;
+    padding: 4px 9px;
+    border: 1px solid var(--primary-light);
+    border-radius: 999px;
+    color: var(--primary-dark);
+    background: var(--bg-warm);
+    font-size: var(--font-xs);
+    text-decoration: none;
+}
+
+.price-check-links.compact {
+    width: 100%;
+    margin-top: 4px;
+}
+
 /* ========== 地图容器 ========== */
 .map-container {
     margin: 12px 0;

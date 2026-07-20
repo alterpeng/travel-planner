@@ -122,6 +122,8 @@ KNOWN_PRICES = {
     "明孝陵": 70, "中山陵": 0, "总统府": 35, "玄武湖": 0,
     "杜甫草堂": 50, "武侯祠": 50, "金沙遗址博物馆": 70,
     "青岛崂山": 90, "蓬莱阁": 100, "刘公岛": 122,
+    "钱江世纪公园": 0, "清河坊历史文化特色街区": 0, "杭州博物馆": 0,
+    "西湖文化广场": 0, "杭州鼓楼": 0, "鼓楼": 0, "胡雪岩旧居": 20,
 }
 
 
@@ -137,7 +139,7 @@ def estimate_ticket(attraction_name="", attraction_type=""):
     # 长名称优先，避免“长城”等短别名抢先匹配更具体的景点。
     for key, price in sorted(KNOWN_PRICES.items(), key=lambda item: len(item[0]), reverse=True):
         if key in attraction_name:
-            return price, True, "景区公开挂牌价参考"
+            return price, True, "历史公开价参考；票种、日期和优惠以平台实时页面为准"
 
     # 2. 高可信免费场所名称。仅凭“博物馆/古镇”等类型不能断言免费。
     free_name_cues = ["广场", "步行街", "商业街", "老街", "市民公园", "城市公园"]
@@ -151,10 +153,25 @@ def estimate_ticket(attraction_name="", attraction_type=""):
 
     return 0, False, "未查到可靠票价，请以景区官方信息为准"
 
-def stable_hash(s, min_val, max_val):
-    """根据字符串生成稳定的哈希值，映射到 [min_val, max_val] 区间"""
-    h = sum(ord(c) * (i + 1) for i, c in enumerate(s[:20]))
-    return min_val + (h % (max_val - min_val + 1))
+
+def build_price_links(name, city="", category="ticket", checkin="", checkout=""):
+    """生成 OTA 实时查询入口；不抓取或伪造需要登录/签名的价格。"""
+    query = " ".join(part for part in [city, name] if part).strip()
+    if category == "hotel":
+        ctrip_params = {"searchText": query}
+        if checkin:
+            ctrip_params["checkInDate"] = checkin
+        if checkout:
+            ctrip_params["checkOutDate"] = checkout
+        ctrip_url = "https://m.ctrip.com/webapp/hotel/hotellist?" + urllib.parse.urlencode(ctrip_params)
+        meituan_query = f"{query} 酒店"
+    else:
+        ctrip_url = "https://you.ctrip.com/searchsite/sight/?" + urllib.parse.urlencode({"query": query})
+        meituan_query = f"{query} 门票"
+    return {
+        "ctrip": ctrip_url,
+        "meituan": "https://i.meituan.com/s/" + urllib.parse.quote(meituan_query, safe=""),
+    }
 
 
 def estimate_accommodation(budget_per_day):
@@ -255,6 +272,7 @@ def search_attractions():
             ticket, ticket_confirmed, ticket_source = estimate_ticket(
                 poi.get("name", ""), poi.get("type", "")
             )
+            price_links = build_price_links(poi.get("name", ""), poi.get("cityname") or city)
             attraction = {
                 "id": poi.get("id"),
                 "name": poi.get("name"),
@@ -268,6 +286,7 @@ def search_attractions():
                 "estimated_cost": ticket,
                 "cost_confirmed": ticket_confirmed,
                 "ticket_source": ticket_source,
+                "price_links": price_links,
             }
             # 处理照片
             photos = poi.get("photos", [])
@@ -332,6 +351,7 @@ def attraction_detail():
         ticket, ticket_confirmed, ticket_source = estimate_ticket(
             poi.get("name", ""), poi.get("type", "")
         )
+        price_links = build_price_links(poi.get("name", ""), poi.get("cityname") or city)
         detail = {
             "id": poi.get("id"),
             "name": poi.get("name"),
@@ -343,6 +363,7 @@ def attraction_detail():
             "estimated_cost": ticket,
             "cost_confirmed": ticket_confirmed,
             "ticket_source": ticket_source,
+            "price_links": price_links,
             "open_time": biz.get("open_time", ""),
             "phone": poi.get("tel", "") or biz.get("tel", ""),
             "website": poi.get("website", ""),
@@ -367,6 +388,8 @@ def search_hotels():
     """
     city = request.args.get("city", "").strip()
     level = request.args.get("budget_level", "comfort").strip()
+    checkin = request.args.get("checkin", "").strip()
+    checkout = request.args.get("checkout", "").strip()
 
     if not city:
         return jsonify({"error": "请输入城市名称"}), 400
@@ -381,12 +404,6 @@ def search_hotels():
         "comfort": "三星级|四星级",
         "luxury": "四星级|五星级|豪华型",
     }
-    cost_range = {
-        "budget": (100, 250),
-        "comfort": (250, 500),
-        "luxury": (500, 2000),
-    }
-
     try:
         params = {
             "key": key,
@@ -403,22 +420,22 @@ def search_hotels():
         if data.get("status") != "1":
             return jsonify({"error": "酒店搜索失败"}), 500
 
-        low, high = cost_range.get(level, (200, 500))
         hotels = []
         for poi in data.get("pois", []):
             biz = poi.get("biz_ext", {}) or {}
             rating = biz.get("rating", "")
-            cost = biz.get("cost", "")
-
-            # 稳定价格：用酒店ID生成固定价格，同酒店不会变
-            est_cost = stable_hash(poi.get("id", ""), low, high)
+            price_links = build_price_links(
+                poi.get("name", ""), city, "hotel", checkin, checkout
+            )
 
             hotels.append({
                 "id": poi.get("id"),
                 "name": poi.get("name"),
                 "address": poi.get("address"),
                 "rating": rating,
-                "estimated_price": int(est_cost) if est_cost else (low + high) // 2,
+                "estimated_price": None,
+                "price_status": "需按入住日期实时查询",
+                "price_links": price_links,
                 "type": poi.get("type", "").split(";")[0],
                 "photo": (poi.get("photos", [{}])[0].get("url", "")) if poi.get("photos") else "",
                 "location": poi.get("location", ""),
@@ -427,7 +444,7 @@ def search_hotels():
         return jsonify({
             "city": city,
             "budget_level": level,
-            "price_range": f"¥{low}~¥{high}",
+            "price_range": "实时价格请在携程或美团查询",
             "hotels": hotels,
         })
 
@@ -555,6 +572,7 @@ def search_city_attractions(city, key, whitelist_names, whitelist_types, blackli
 
                 # biz_ext.cost 是 POI 人均消费，不是景点门票，不能直接采用。
                 cost, confirmed, ticket_source = estimate_ticket(poi_name, poi_type)
+                price_links = build_price_links(poi_name, city)
 
                 all_attractions.append({
                     "id": poi.get("id"),
@@ -567,6 +585,7 @@ def search_city_attractions(city, key, whitelist_names, whitelist_types, blackli
                     "cost": cost,
                     "cost_confirmed": confirmed,
                     "ticket_source": ticket_source,
+                    "price_links": price_links,
                     "boost": boost,
                 })
     except Exception:
@@ -757,6 +776,7 @@ def generate_route():
                      "address": a["address"], "ticket": a["cost"],
                      "cost_confirmed": a.get("cost_confirmed", False),
                      "ticket_source": a.get("ticket_source", ""),
+                     "price_links": a.get("price_links", {}),
                      "location": a["location"], "rating": a["rating"]}
                     for a in day_attrs
                 ],

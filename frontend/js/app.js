@@ -434,6 +434,7 @@ function renderSearchResults(attractions) {
                     ${a.rating ? `<span>⭐ ${a.rating}</span>` : ''}
                     <span title="${escHtml(a.ticket_source || '')}">🎫 ${formatTicketText(a)}</span>
                 </div>
+                ${renderPriceLinks(a.price_links, true)}
             </div>
         </div>
     `).join('');
@@ -444,6 +445,9 @@ function renderSearchResults(attractions) {
             const idx = parseInt(item.dataset.attractionIndex);
             openDetail(attractions[idx]);
         });
+    });
+    searchResults.querySelectorAll('.price-check-links a').forEach(link => {
+        link.addEventListener('click', event => event.stopPropagation());
     });
 }
 
@@ -457,10 +461,19 @@ function escHtml(str) {
 function formatTicketText(attraction) {
     const price = Number(attraction.estimated_cost ?? attraction.ticket ?? attraction.cost ?? 0);
     const confirmed = Boolean(attraction.cost_confirmed);
-    if (confirmed && price === 0) return '免费（需预约时以官方为准）';
-    if (confirmed) return `¥${price}（挂牌价参考）`;
-    if (price > 0) return `约 ¥${price}`;
+    if (confirmed && price === 0) return '参考免费（以实时页面为准）';
+    if (confirmed) return `参考 ¥${price}`;
+    if (price > 0) return `预算约 ¥${price}`;
     return '票价待确认';
+}
+
+function renderPriceLinks(links, compact = false) {
+    if (!links) return '';
+    const cls = compact ? 'price-check-links compact' : 'price-check-links';
+    return `<span class="${cls}">
+        ${links.ctrip ? `<a href="${escHtml(links.ctrip)}" target="_blank" rel="noopener">携程实时价</a>` : ''}
+        ${links.meituan ? `<a href="${escHtml(links.meituan)}" target="_blank" rel="noopener">美团实时价</a>` : ''}
+    </span>`;
 }
 
 function isMobileBrowser() {
@@ -517,7 +530,11 @@ btnGenerate.addEventListener('click', async () => {
         let guideData = null;
         const budgetLevel = budget <= 2000 ? 'budget' : budget <= 5000 ? 'comfort' : 'luxury';
         try {
-            hotelData = await api('GET', `/api/hotels?city=${encodeURIComponent(destination)}&budget_level=${budgetLevel}`);
+            const checkin = routeDate.value || new Date().toISOString().slice(0, 10);
+            const checkoutDate = new Date(`${checkin}T12:00:00`);
+            checkoutDate.setDate(checkoutDate.getDate() + Math.max(1, days || 1));
+            const checkout = checkoutDate.toISOString().slice(0, 10);
+            hotelData = await api('GET', `/api/hotels?city=${encodeURIComponent(destination)}&budget_level=${budgetLevel}&checkin=${encodeURIComponent(checkin)}&checkout=${encodeURIComponent(checkout)}`);
         } catch (e) { /* silent */ }
         try {
             guideData = await api('GET', `/api/guide?city=${encodeURIComponent(destination)}`);
@@ -608,7 +625,7 @@ function renderRoute(data, hotelData, guideData, budgetLevel) {
                     <div class="day-header">
                         <span>📅 ${cityLabel}第${item.day}天 · ${item.date}</span>
                         ${hasWeather ? `<span class="day-weather-inline">${weatherIcon(w.weather_day)} ${w.weather_day} ${w.temp_min}°~${w.temp_max}°</span>` : ''}
-                        <span>💰 ¥${item.day_total}</span>
+                        <span class="day-total" data-original-total="${item.day_total}">💰 ¥${item.day_total}</span>
                     </div>
                     <div class="day-body">
                         ${(item.attractions || []).map(a => `
@@ -616,11 +633,12 @@ function renderRoute(data, hotelData, guideData, budgetLevel) {
                                 <span class="day-attr-name">🏛️ ${escHtml(a.name)}</span>
                                 <span class="day-attr-tag">${escHtml(a.type)}</span>
                                 <span class="day-attr-cost" title="${escHtml(a.ticket_source || '')}">🎫 ${formatTicketText(a)}</span>
+                                ${renderPriceLinks(a.price_links, true)}
                             </div>
                         `).join('')}
                     </div>
                     <div class="day-footer">
-                        <span class="hotel-toggle" data-day="${item.day}" data-cost="${item.hotel_cost}">🏨 ${item.hotel} ¥${item.hotel_cost} <small style="color:var(--primary);cursor:pointer;">[不住]</small></span>
+                        <span class="hotel-toggle" data-day="${item.day}" data-cost="${item.hotel_cost}">🏨 住宿预算 ¥${item.hotel_cost} <small style="color:var(--primary);cursor:pointer;">[不住]</small></span>
                         <span>🍜 餐饮 ¥${item.food_cost}</span>
                         <span>🚌 交通 ¥${item.transport_cost}</span>
                     </div>
@@ -638,10 +656,10 @@ function renderRoute(data, hotelData, guideData, budgetLevel) {
         <div class="cost-breakdown">
             <h4>📊 费用明细</h4>
             <div class="cost-row"><span>🚄 城际交通</span><span>¥${summary.cost_breakdown.transport_intercity}</span></div>
-            <div class="cost-row"><span>🏨 住宿 (${summary.days}晚)</span><span>¥${summary.cost_breakdown.hotel}</span></div>
+            <div class="cost-row"><span>🏨 住宿预算 (${summary.days}晚)</span><span>¥${summary.cost_breakdown.hotel}</span></div>
             <div class="cost-row"><span>🍜 餐饮 (${summary.days}天)</span><span>¥${summary.cost_breakdown.food}</span></div>
             <div class="cost-row"><span>🚌 市内交通</span><span>¥${summary.cost_breakdown.transport_inner}</span></div>
-            <div class="cost-row"><span>🎫 门票</span><span>¥${summary.cost_breakdown.tickets}</span></div>
+            <div class="cost-row"><span>🎫 门票预算</span><span>¥${summary.cost_breakdown.tickets}</span></div>
             <div class="cost-row" style="font-weight:700; border-top:1px solid #ddd; padding-top:4px; margin-top:4px;">
                 <span>总计</span><span style="color:var(--primary-dark)">¥${summary.total_estimated}</span>
             </div>
@@ -684,8 +702,8 @@ function renderRoute(data, hotelData, guideData, budgetLevel) {
                 <img id="route-map-image" src="${refreshedMapUrl}" data-base-src="${mapUrl}" alt="路线地图" style="width:100%;">
                 <div id="route-map-error" class="map-placeholder" style="display:none;">
                     <span>地图暂时没有加载出来</span>
-                    <button id="btn-retry-map" type="button" class="btn btn-outline btn-sm">重新加载</button>
                 </div>
+                <button id="btn-retry-map" type="button" class="btn btn-outline btn-block" style="margin-top:8px;">🔄 重新加载路线地图</button>
                 ${navUrl ? `<a href="${navUrl}" target="_blank" rel="noopener" class="btn btn-primary btn-block" style="margin-top:8px;">🗺️ 在高德地图中打开导航</a>` : ''}
             </div>
         `;
@@ -702,10 +720,11 @@ function renderRoute(data, hotelData, guideData, budgetLevel) {
                         <div class="hotel-info">
                             <div class="hotel-name">${escHtml(h.name)}</div>
                             <div class="hotel-meta">📍 ${escHtml(h.address || '')} ${h.rating ? '⭐'+h.rating : ''}</div>
+                            ${renderPriceLinks(h.price_links)}
                         </div>
                         <div class="hotel-price">
-                            <div class="price-val">¥${h.estimated_price}</div>
-                            <div class="price-label">约/晚</div>
+                            <div class="price-val price-live">实时价</div>
+                            <div class="price-label">按日期查询</div>
                         </div>
                     </div>
                 `).join('')}
@@ -747,11 +766,16 @@ function renderRoute(data, hotelData, guideData, budgetLevel) {
     const mapImage = $('#route-map-image');
     const mapError = $('#route-map-error');
     if (mapImage && mapError) {
+        let mapTimeout = setTimeout(() => {
+            if (!mapImage.complete) mapError.style.display = 'flex';
+        }, 12000);
         mapImage.addEventListener('load', () => {
+            clearTimeout(mapTimeout);
             mapImage.style.display = 'block';
             mapError.style.display = 'none';
         });
         mapImage.addEventListener('error', () => {
+            clearTimeout(mapTimeout);
             mapImage.style.display = 'none';
             mapError.style.display = 'flex';
         });
@@ -765,10 +789,14 @@ function renderRoute(data, hotelData, guideData, budgetLevel) {
             }
         }
         $('#btn-retry-map').addEventListener('click', () => {
+            clearTimeout(mapTimeout);
             mapError.style.display = 'none';
             mapImage.style.display = 'block';
             const separator = mapImage.dataset.baseSrc.includes('?') ? '&' : '?';
             mapImage.src = `${mapImage.dataset.baseSrc}${separator}refresh=${Date.now()}`;
+            mapTimeout = setTimeout(() => {
+                if (!mapImage.complete) mapError.style.display = 'flex';
+            }, 12000);
         });
     }
 
@@ -842,7 +870,7 @@ function renderRoute(data, hotelData, guideData, budgetLevel) {
                 span.innerHTML = `🏠 不住 ¥0 <small style="color:var(--success);cursor:pointer;">[恢复]</small>`;
                 span.dataset.currentCost = '0';
             } else {
-                span.innerHTML = `🏨 ${currentHotelLevel || '酒店'} ¥${originalCost} <small style="color:var(--primary);cursor:pointer;">[不住]</small>`;
+                span.innerHTML = `🏨 住宿预算 ¥${originalCost} <small style="color:var(--primary);cursor:pointer;">[不住]</small>`;
                 span.dataset.currentCost = originalCost.toString();
             }
             span.dataset.cost = originalCost.toString();
@@ -1066,6 +1094,15 @@ function recalcRouteTotal() {
     let currentHotelTotal = 0;
     routeResult.querySelectorAll('.hotel-toggle').forEach(span => {
         currentHotelTotal += parseInt(span.dataset.currentCost || span.dataset.cost || '0');
+
+        const dayCard = span.closest('.day-card');
+        const dayTotal = dayCard ? dayCard.querySelector('.day-total') : null;
+        if (dayTotal) {
+            const originalDayTotal = parseInt(dayTotal.dataset.originalTotal || '0');
+            const originalHotelCost = parseInt(span.dataset.cost || '0');
+            const currentHotelCost = parseInt(span.dataset.currentCost || span.dataset.cost || '0');
+            dayTotal.textContent = `💰 ¥${originalDayTotal - originalHotelCost + currentHotelCost}`;
+        }
     });
 
     // 新总费用 = 原总费用 - 原酒店费 + 当前酒店费
