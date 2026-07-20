@@ -106,7 +106,7 @@ def estimate_accommodation(budget_per_day):
         return "豪华型", 700
 
 # ========== 重试机制（处理 API 超时等偶发失败）==========
-def safe_request(url, params, timeout=10, max_retries=2):
+def safe_request(url, params, timeout=10, max_retries=1):
     """带重试的 HTTP 请求"""
     last_error = None
     for attempt in range(max_retries + 1):
@@ -349,42 +349,33 @@ def generate_route():
     blacklist_names = {item["name"] for item in prefs.get("blacklist", [])}
     blacklist_types = {item.get("type", "") for item in prefs.get("blacklist", [])}
 
-    # 搜索目的地景点
+    # 搜索目的地景点（单次请求优化，避免超时）
     all_attractions = []
-    search_keywords = ["景点", "公园", "博物馆", "名胜古迹", "寺庙", "自然风光", "老街", "古镇"]
-
-    for kw in search_keywords:
-        try:
-            params = {
-                "key": key,
-                "keywords": kw,
-                "city": destination,
-                "types": "风景名胜|公园|博物馆|纪念馆|寺庙道观|游乐园|动物园|植物园|温泉|海滩|山峰|湖泊|古镇|国家级景点|省级景点",
-                "offset": 10,
-                "page": 1,
-                "extensions": "all",
-            }
-            result = safe_request("https://restapi.amap.com/v3/place/text", params)
-            if result.get("status") == "1":
-                for poi in result.get("pois", []):
-                    poi_name = poi.get("name", "")
-                    poi_type = poi.get("type", "").split(";")[0] if poi.get("type") else ""
-
-                    # 去重
-                    if any(a["name"] == poi_name for a in all_attractions):
-                        continue
-
-                    all_attractions.append({
-                        "id": poi.get("id"),
-                        "name": poi_name,
-                        "address": poi.get("address"),
-                        "type": poi_type,
-                        "location": poi.get("location", ""),
-                        "rating": poi.get("biz_ext", {}).get("rating", ""),
-                        "cost": estimate_ticket(poi.get("type", "")),
-                    })
-        except Exception:
-            continue  # 某个关键词失败不影响整体
+    # 一次搜索覆盖多个关键词，减少 API 调用次数
+    try:
+        params = {
+            "key": key,
+            "keywords": "旅游景点",  # 高德 POI 会匹配各类景点
+            "city": destination,
+            "types": "风景名胜|公园|博物馆|纪念馆|寺庙道观|游乐园|动物园|植物园|温泉|海滩|山峰|湖泊|古镇|国家级景点|省级景点|知名景点",
+            "offset": 25,
+            "page": 1,
+            "extensions": "all",
+        }
+        result = safe_request("https://restapi.amap.com/v3/place/text", params, timeout=15)
+        if result.get("status") == "1":
+            for poi in result.get("pois", []):
+                all_attractions.append({
+                    "id": poi.get("id"),
+                    "name": poi.get("name"),
+                    "address": poi.get("address"),
+                    "type": poi.get("type", "").split(";")[0] if poi.get("type") else "",
+                    "location": poi.get("location", ""),
+                    "rating": poi.get("biz_ext", {}).get("rating", ""),
+                    "cost": estimate_ticket(poi.get("type", "")),
+                })
+    except Exception:
+        pass  # API 失败时返回空列表，下方会处理
 
     if not all_attractions:
         return jsonify({"error": f"在「{destination}」未找到景点信息"}), 404
