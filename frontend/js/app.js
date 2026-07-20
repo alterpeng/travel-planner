@@ -581,7 +581,7 @@ function renderRoute(data, hotelData, guideData, budgetLevel) {
                             <div class="day-attraction clickable" data-id="${escHtml(a.id || a.name)}">
                                 <span class="day-attr-name">🏛️ ${escHtml(a.name)}</span>
                                 <span class="day-attr-tag">${escHtml(a.type)}</span>
-                                <span class="day-attr-cost">门票 ¥${a.ticket}</span>
+                                <span class="day-attr-cost">${a.ticket === 0 ? '🆓 免费' : (a.cost_confirmed ? '🎫 ¥' + a.ticket : '🎫 约¥' + a.ticket)}</span>
                             </div>
                         `).join('')}
                     </div>
@@ -629,14 +629,15 @@ function renderRoute(data, hotelData, guideData, budgetLevel) {
     });
     html += '</div>';
 
-    // 地图
+    // 地图（通过后端代理避免浏览器拦截）
     const mapUrl = data.map_url || '';
     const navUrl = data.nav_url || '';
     if (mapUrl) {
+        const proxyUrl = `/api/map-image?url=${encodeURIComponent(mapUrl)}`;
         html += `
             <div class="map-container" style="margin-top:16px;">
                 <h3 style="margin-bottom:8px;">🗺️ 路线地图（编号对应上方景点）</h3>
-                <img src="${mapUrl}" alt="路线地图" style="width:100%;" onerror="this.insertAdjacentHTML('afterend','<p style=color:#999;text-align:center;padding:12px>地图加载失败，请刷新重试</p>');this.style.display='none'">
+                <img src="${proxyUrl}" alt="路线地图" style="width:100%;" onerror="this.insertAdjacentHTML('afterend','<p style=color:#999;text-align:center;padding:12px>地图加载失败，请刷新重试</p>');this.style.display='none'">
                 ${navUrl ? `<a href="${navUrl}" target="_blank" class="btn btn-primary btn-block" style="margin-top:8px;">🗺️ 在高德地图中打开导航</a>` : ''}
             </div>
         `;

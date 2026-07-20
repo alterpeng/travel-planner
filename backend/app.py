@@ -487,6 +487,13 @@ def search_city_attractions(city, key, whitelist_names, whitelist_types, blackli
                 if poi_type in whitelist_types:
                     boost += 5
 
+                # 真实票价：优先用高德 biz_ext.cost
+                biz_cost = (poi.get("biz_ext", {}) or {}).get("cost", "")
+                try:
+                    real_cost = float(biz_cost) if biz_cost else 0
+                except (ValueError, TypeError):
+                    real_cost = 0
+
                 all_attractions.append({
                     "id": poi.get("id"),
                     "name": poi_name,
@@ -495,7 +502,8 @@ def search_city_attractions(city, key, whitelist_names, whitelist_types, blackli
                     "city": city,
                     "location": poi.get("location", ""),
                     "rating": poi.get("biz_ext", {}).get("rating", ""),
-                    "cost": estimate_ticket(poi.get("type", "")),
+                    "cost": int(real_cost) if real_cost > 0 else estimate_ticket(poi.get("type", "")),
+                    "cost_confirmed": real_cost > 0,  # 是否为真实价格
                     "boost": boost,
                 })
     except Exception:
@@ -525,39 +533,6 @@ def fetch_weather(city, key):
     except Exception:
         pass
     return forecasts
-
-
-def estimate_intercity_transport(from_city, to_city):
-    """估算城际交通方式与费用"""
-    # 基于距离的经验估算
-    distance_map = {
-        ("北京","天津"): (120, "高铁", 55, "0.5小时"),
-        ("北京","上海"): (1200, "高铁", 550, "4.5小时"),
-        ("北京","杭州"): (1300, "高铁", 580, "5小时"),
-        ("上海","杭州"): (170, "高铁", 75, "1小时"),
-        ("上海","南京"): (300, "高铁", 140, "1.5小时"),
-        ("上海","苏州"): (100, "高铁", 40, "0.5小时"),
-        ("杭州","苏州"): (200, "高铁", 110, "1.5小时"),
-        ("杭州","南京"): (280, "高铁", 130, "1.5小时"),
-        ("南京","苏州"): (220, "高铁", 100, "1小时"),
-        ("广州","深圳"): (140, "高铁", 75, "0.5小时"),
-        ("成都","重庆"): (300, "高铁", 150, "1.5小时"),
-        ("西安","洛阳"): (380, "高铁", 175, "1.5小时"),
-    }
-
-    pair1 = (from_city, to_city)
-    pair2 = (to_city, from_city)
-
-    if pair1 in distance_map:
-        dist, mode, cost, duration = distance_map[pair1]
-    elif pair2 in distance_map:
-        dist, mode, cost, duration = distance_map[pair2]
-    else:
-        # 默认估算
-        dist, mode, cost, duration = 500, "高铁", 200, "3小时"
-
-    return {"from": from_city, "to": to_city, "distance_km": dist,
-            "mode": mode, "cost": cost, "duration": duration}
 
 
 @app.route("/api/route/generate", methods=["POST"])
@@ -651,7 +626,7 @@ def generate_route():
     intercity_total = 0
     all_routes = [departure] + cities
     for i in range(len(all_routes) - 1):
-        trans = estimate_intercity_transport(all_routes[i], all_routes[i + 1])
+        trans = estimate_intercity_transport(all_routes[i], all_routes[i + 1], key)
         intercity_transports.append(trans)
         intercity_total += trans["cost"]
 
@@ -711,6 +686,7 @@ def generate_route():
                 "attractions": [
                     {"id": a["id"], "name": a["name"], "type": a["type"],
                      "address": a["address"], "ticket": a["cost"],
+                     "cost_confirmed": a.get("cost_confirmed", False),
                      "location": a["location"], "rating": a["rating"]}
                     for a in day_attrs
                 ],
@@ -788,6 +764,86 @@ def generate_route():
         "nav_url": nav_url,
         "blacklist_filtered": 0,
     })
+
+
+# ----- 地图图片代理 -----
+@app.route("/api/map-image")
+def map_image():
+    """代理高德静态地图（避免浏览器 Referer 限制）"""
+    url = request.args.get("url", "")
+    if not url:
+        return "missing url", 400
+    try:
+        resp = requests.get(url, timeout=15)
+        return resp.content, resp.status_code, {"Content-Type": "image/png"}
+    except Exception:
+        return "failed", 500
+
+
+# ----- 真实高铁票价计算 -----
+def get_real_distance(from_city, to_city, key):
+    """使用高德 API 计算城市间实际驾车距离"""
+    try:
+        # 先地理编码获取城市坐标
+        geo_params = {"key": key, "address": from_city, "city": from_city}
+        geo1 = safe_request("https://restapi.amap.com/v3/geocode/geo", geo_params, timeout=8)
+        loc1 = geo1.get("geocodes", [{}])[0].get("location", "")
+
+        geo_params["address"] = to_city
+        geo_params["city"] = to_city
+        geo2 = safe_request("https://restapi.amap.com/v3/geocode/geo", geo_params, timeout=8)
+        loc2 = geo2.get("geocodes", [{}])[0].get("location", "")
+
+        if loc1 and loc2:
+            # 驾车距离
+            dir_params = {
+                "key": key,
+                "origin": loc1,
+                "destination": loc2,
+                "strategy": "10",  # 不走高速（最短路径）
+            }
+            direction = safe_request("https://restapi.amap.com/v3/direction/driving", dir_params, timeout=10)
+            distance_str = direction.get("route", {}).get("paths", [{}])[0].get("distance", "0")
+            return int(distance_str)  # 米
+    except Exception:
+        pass
+    return 0  # 失败返回 0，走 fallback
+
+
+def estimate_intercity_transport(from_city, to_city, key):
+    """估算城际交通方式与费用（优先用实际距离）"""
+    dist_m = get_real_distance(from_city, to_city, key)
+    if dist_m > 0:
+        dist_km = dist_m / 1000
+    else:
+        # Fallback：小范围默认值
+        dist_km = 500
+
+    if dist_km < 200:
+        mode, price_per_km = "高铁", 0.48
+    elif dist_km < 800:
+        mode, price_per_km = "高铁", 0.46
+    elif dist_km < 1500:
+        mode, price_per_km = "高铁", 0.42
+    else:
+        mode, price_per_km = "飞机", 0.80
+
+    cost = int(dist_km * price_per_km)
+    duration_h = dist_km / 250  # 高铁均速 250km/h
+    if duration_h < 0.5:
+        duration = "0.5小时"
+    elif duration_h < 1:
+        duration = f"{int(duration_h * 60)}分钟"
+    else:
+        hours = int(duration_h)
+        mins = int((duration_h - hours) * 60)
+        duration = f"{hours}小时{mins}分钟" if mins > 0 else f"{hours}小时"
+
+    return {
+        "from": from_city, "to": to_city,
+        "distance_km": int(dist_km),
+        "mode": mode, "cost": cost, "duration": duration
+    }
 
 
 # ----- 攻略推荐 -----
