@@ -1121,3 +1121,190 @@ html, body {
     color: var(--text-light);
     font-size: var(--font-sm);
 }
+
+/* ========== 时间线 / 完整线路 ========== */
+.fullroute-content {
+    background: white;
+    border-radius: 20px 20px 0 0;
+    width: 100%;
+    max-width: 500px;
+    max-height: 90vh;
+    overflow-y: auto;
+    animation: slideUp 0.3s ease;
+}
+
+.timeline {
+    position: relative;
+    padding-left: 28px;
+}
+
+.timeline::before {
+    content: '';
+    position: absolute;
+    left: 12px;
+    top: 0;
+    bottom: 0;
+    width: 3px;
+    background: linear-gradient(to bottom, var(--primary), var(--accent), var(--success));
+    border-radius: 2px;
+}
+
+.timeline-item {
+    position: relative;
+    margin-bottom: 16px;
+    padding-left: 12px;
+}
+
+.timeline-item::before {
+    content: '';
+    position: absolute;
+    left: -20px;
+    top: 8px;
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    background: white;
+    border: 3px solid var(--primary);
+}
+
+.timeline-item.city-header::before {
+    border-color: var(--accent);
+    background: var(--accent);
+    width: 16px;
+    height: 16px;
+    left: -22px;
+}
+
+.timeline-item.transport::before {
+    border-color: #2196F3;
+    background: #2196F3;
+    width: 10px;
+    height: 10px;
+    left: -19px;
+}
+
+.city-badge {
+    display: inline-block;
+    background: linear-gradient(135deg, var(--primary), var(--accent));
+    color: white;
+    padding: 4px 14px;
+    border-radius: 20px;
+    font-size: var(--font-md);
+    font-weight: 700;
+    margin-bottom: 6px;
+}
+
+.city-days {
+    font-size: var(--font-xs);
+    color: var(--text-light);
+    margin-left: 6px;
+}
+
+.transport-badge {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background: #E3F2FD;
+    padding: 8px 12px;
+    border-radius: var(--radius-sm);
+    font-size: var(--font-sm);
+    color: #1565C0;
+    margin: 8px 0;
+}
+
+.transport-badge .trans-icon {
+    font-size: 22px;
+}
+
+.transport-badge .trans-info {
+    flex: 1;
+}
+
+.transport-badge .trans-cost {
+    font-weight: 700;
+    color: var(--primary-dark);
+}
+
+.timeline-day {
+    background: var(--bg);
+    border-radius: var(--radius-sm);
+    padding: 8px 10px;
+    margin-top: 4px;
+}
+
+.timeline-day .td-header {
+    font-size: var(--font-xs);
+    color: var(--text-light);
+    margin-bottom: 4px;
+    font-weight: 600;
+}
+
+.timeline-day .td-spots {
+    font-size: var(--font-sm);
+    color: var(--text);
+}
+
+.timeline-day .td-spots span {
+    display: inline-block;
+    margin-right: 6px;
+}
+
+.timeline-day .td-spots span::before {
+    content: '📍 ';
+}
+
+/* ========== 保存路线按钮和列表 ========== */
+.route-actions {
+    display: flex;
+    gap: 8px;
+    margin-top: 16px;
+}
+
+.route-actions .btn {
+    flex: 1;
+}
+
+.saved-routes-list {
+    max-height: 300px;
+    overflow-y: auto;
+}
+
+.saved-route-card {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 12px;
+    background: var(--bg);
+    border-radius: var(--radius-sm);
+    margin-bottom: 8px;
+}
+
+.saved-route-info {
+    flex: 1;
+    min-width: 0;
+}
+
+.saved-route-name {
+    font-weight: 600;
+    font-size: var(--font-md);
+    margin-bottom: 2px;
+}
+
+.saved-route-meta {
+    font-size: var(--font-xs);
+    color: var(--text-light);
+}
+
+.saved-route-actions {
+    display: flex;
+    gap: 6px;
+}
+
+.saved-route-actions .btn {
+    padding: 6px 10px;
+    font-size: var(--font-xs);
+}
+
+.save-name-input {
+    margin-bottom: 8px;
+}

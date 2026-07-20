@@ -36,7 +36,7 @@
             <h3 class="card-title">🗺️ 生成旅行路线</h3>
             <div class="form-group">
                 <label class="label">目的地城市 <span class="required">*</span></label>
-                <input type="text" id="route-destination" placeholder="如：杭州" class="input">
+                <input type="text" id="route-destination" placeholder="如：杭州 或 杭州,苏州,南京" class="input">
             </div>
             <div class="form-row">
                 <div class="form-group flex-1">
@@ -62,6 +62,13 @@
             <button id="btn-generate" class="btn btn-accent btn-block">✨ 生成路线</button>
 
             <div id="route-result" class="route-result"></div>
+        </div>
+    </section>
+
+        <!-- 已保存路线 -->
+        <div class="card" id="saved-routes-card" style="display:none;">
+            <h3 class="card-title">💾 已保存的路线</h3>
+            <div id="saved-routes-list" class="saved-routes-list"></div>
         </div>
     </section>
 
@@ -197,6 +204,17 @@
                 <button id="detail-dislike" class="btn btn-danger flex-1">👎 加入黑名单</button>
             </div>
         </div>
+    </div>
+</div>
+
+<!-- ========== 完整线路弹窗 ========== -->
+<div id="fullroute-modal" class="modal-overlay" style="display:none;">
+    <div class="fullroute-content">
+        <div class="modal-header">
+            <h2>🗺️ 完整线路</h2>
+            <button id="fullroute-close" class="modal-close">✕</button>
+        </div>
+        <div class="modal-body" id="fullroute-body"></div>
     </div>
 </div>
 

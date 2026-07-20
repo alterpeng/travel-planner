@@ -42,6 +42,14 @@ const detailPhotos = $('#detail-photos');
 const detailLike = $('#detail-like');
 const detailDislike = $('#detail-dislike');
 let currentDetailAttraction = null;
+let currentRouteData = null;  // 当前生成的路线数据，用于保存
+
+// 已保存路线 + 完整线路
+const savedRoutesCard = $('#saved-routes-card');
+const savedRoutesList = $('#saved-routes-list');
+const fullrouteModal = $('#fullroute-modal');
+const fullrouteClose = $('#fullroute-close');
+const fullrouteBody = $('#fullroute-body');
 
 // 天气
 const weatherCity = $('#weather-city');
@@ -130,6 +138,8 @@ function switchTab(tabName) {
     const nav = document.querySelector(`[data-tab="tab-${tabName}"]`);
     if (nav) nav.classList.add('active');
 
+    // 切换到首页时加载已保存路线
+    if (tabName === 'home') loadSavedRoutes();
     // 切换到偏好 tab 时刷新
     if (tabName === 'preferences') loadPreferences();
     // 切换到设置 tab 时加载配置
@@ -239,6 +249,138 @@ function generateMapImage(mapUrlFromServer) {
     // 地图 URL 由后端生成（保护 API Key 安全）
     return mapUrlFromServer || '';
 }
+
+// ========== 保存路线 ==========
+async function saveRoute() {
+    if (!currentRouteData) {
+        showToast('没有可保存的路线', 'error');
+        return;
+    }
+    const dest = currentRouteData.summary.destination;
+    const name = prompt('给这条路线起个名字：', dest);
+    if (!name) return;
+
+    try {
+        const resp = await api('POST', '/api/routes/saved', {
+            name: name.trim(),
+            route_data: currentRouteData,
+        });
+        showToast(resp.message, 'success');
+        loadSavedRoutes();
+    } catch (err) {
+        showToast(err.message, 'error');
+    }
+}
+
+async function loadSavedRoutes() {
+    try {
+        const data = await api('GET', '/api/routes/saved');
+        const routes = data.routes || [];
+        if (routes.length === 0) {
+            savedRoutesCard.style.display = 'none';
+            return;
+        }
+        savedRoutesCard.style.display = 'block';
+        savedRoutesList.innerHTML = routes.map(r => `
+            <div class="saved-route-card">
+                <div class="saved-route-info">
+                    <div class="saved-route-name">📌 ${escHtml(r.name)}</div>
+                    <div class="saved-route-meta">${escHtml(r.destination)} · ${r.days}天 · ¥${r.budget} · ${r.saved_at ? r.saved_at.slice(0, 10) : ''}</div>
+                </div>
+                <div class="saved-route-actions">
+                    <button class="btn btn-sm btn-primary load-route" data-id="${r.id}">查看</button>
+                    <button class="btn btn-sm btn-outline del-route" data-id="${r.id}">删除</button>
+                </div>
+            </div>
+        `).join('');
+
+        savedRoutesList.querySelectorAll('.load-route').forEach(btn => {
+            btn.addEventListener('click', async () => {
+                try {
+                    showLoading();
+                    const data = await api('GET', `/api/routes/saved/${btn.dataset.id}`);
+                    renderRoute(data);
+                    hideLoading();
+                } catch (err) {
+                    showToast(err.message, 'error');
+                    hideLoading();
+                }
+            });
+        });
+
+        savedRoutesList.querySelectorAll('.del-route').forEach(btn => {
+            btn.addEventListener('click', async () => {
+                if (!confirm('确定删除这条路线吗？')) return;
+                try {
+                    await api('DELETE', `/api/routes/saved/${btn.dataset.id}`);
+                    showToast('已删除', 'success');
+                    loadSavedRoutes();
+                } catch (err) {
+                    showToast(err.message, 'error');
+                }
+            });
+        });
+    } catch (err) {
+        console.error('加载已保存路线失败:', err);
+    }
+}
+
+// ========== 完整线路视图 ==========
+function showFullRoute(data) {
+    const { summary, itinerary } = data;
+    let html = '';
+
+    // 概览
+    html += `<div style="text-align:center;margin-bottom:16px;">
+        <h3 style="margin:0;">${summary.departure} → ${summary.destination}</h3>
+        <p style="color:#999;font-size:13px;">${summary.days}天 · ¥${summary.total_estimated} · ${summary.budget_fit}</p>
+    </div>`;
+
+    // 时间线
+    html += '<div class="timeline">';
+
+    itinerary.forEach(item => {
+        if (item.type === 'city_header') {
+            html += `
+                <div class="timeline-item city-header">
+                    <span class="city-badge">🏙️ ${escHtml(item.city)}</span>
+                    <span class="city-days">从第${item.day_start}天开始</span>
+                </div>
+            `;
+        } else if (item.type === 'transport') {
+            html += `
+                <div class="timeline-item transport">
+                    <div class="transport-badge">
+                        <span class="trans-icon">🚄</span>
+                        <span class="trans-info">${escHtml(item.from_city)} → ${escHtml(item.to_city)}<br><small>${item.mode} · ${item.duration}</small></span>
+                        <span class="trans-cost">¥${item.cost}</span>
+                    </div>
+                </div>
+            `;
+        } else if (item.type === 'day' || item.day) {
+            const w = item.weather || {};
+            html += `
+                <div class="timeline-item">
+                    <div class="timeline-day">
+                        <div class="td-header">📅 第${item.day}天 · ${item.date} ${w.weather_day ? `· ${weatherIcon(w.weather_day)} ${w.weather_day} ${w.temp_min}°~${w.temp_max}°` : ''}</div>
+                        <div class="td-spots">
+                            ${(item.attractions || []).map(a => `<span>${escHtml(a.name)}</span>`).join('')}
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+    });
+
+    html += '</div>';
+    fullrouteBody.innerHTML = html;
+    fullrouteModal.style.display = 'flex';
+}
+
+fullrouteClose.addEventListener('click', () => { fullrouteModal.style.display = 'none'; });
+fullrouteModal.addEventListener('click', (e) => {
+    if (e.target === fullrouteModal) fullrouteModal.style.display = 'none';
+});
 
 // ========== 首页 - 搜索景点 ==========
 btnSearch.addEventListener('click', async () => {
@@ -352,8 +494,11 @@ btnGenerate.addEventListener('click', async () => {
     }
 });
 
+let currentRouteData = null;
+
 function renderRoute(data, hotelData, budgetLevel) {
-    const { summary, itinerary, hotel_level, unused_attractions, blacklist_filtered } = data;
+    currentRouteData = data;
+    const { summary, itinerary, hotel_level } = data;
 
     let html = '';
 
@@ -368,6 +513,10 @@ function renderRoute(data, hotelData, budgetLevel) {
                     <div class="summary-label">天数</div>
                 </div>
                 <div class="summary-item">
+                    <div class="summary-val">${summary.cities ? summary.cities.length : 1}</div>
+                    <div class="summary-label">城市</div>
+                </div>
+                <div class="summary-item">
                     <div class="summary-val">¥${summary.total_estimated}</div>
                     <div class="summary-label">预估总费用</div>
                 </div>
@@ -377,41 +526,68 @@ function renderRoute(data, hotelData, budgetLevel) {
                 </div>
             </div>
             <div class="budget-fit ${fitClass}">${summary.budget_fit}</div>
-            ${blacklist_filtered > 0 ? `<p style="margin-top:8px;font-size:13px;color:#999;">已自动过滤 ${blacklist_filtered} 个黑名单景点</p>` : ''}
         </div>
     `;
 
-    // 每天行程
-    itinerary.forEach(day => {
-        const w = day.weather || {};
-        const hasWeather = w.weather_day && w.temp_max;
-        html += `
-            <div class="day-card">
-                <div class="day-header">
-                    <span>📅 第${day.day}天 · ${day.date}</span>
-                    ${hasWeather ? `<span class="day-weather-inline">${weatherIcon(w.weather_day)} ${w.weather_day} ${w.temp_min}°~${w.temp_max}° 🌬️${w.wind_dir}${w.wind_scale}级</span>` : ''}
-                    <span>💰 ¥${day.day_total}</span>
+    // 城际交通概览（多城市时显示）
+    if (summary.intercity_transports && summary.intercity_transports.length > 0) {
+        html += `<div class="transport-badge" style="margin-bottom:12px;">`;
+        html += `<span class="trans-icon">🚄</span><span class="trans-info">`;
+        summary.intercity_transports.forEach((t, i) => {
+            html += `${t.from} → ${t.to}: ${t.mode} ¥${t.cost} (${t.duration})`;
+            if (i < summary.intercity_transports.length - 1) html += ' | ';
+        });
+        html += `</span></div>`;
+    }
+
+    // 每日行程（处理多城市格式）
+    let currentCity = '';
+    itinerary.forEach(item => {
+        if (item.type === 'city_header') {
+            currentCity = item.city;
+            html += `<div style="text-align:center;margin:16px 0 8px;">
+                <span class="city-badge">🏙️ ${escHtml(item.city)}</span>
+            </div>`;
+        } else if (item.type === 'transport') {
+            html += `
+                <div class="transport-badge">
+                    <span class="trans-icon">🚄</span>
+                    <span class="trans-info">${escHtml(item.from_city)} → ${escHtml(item.to_city)}: ${item.mode} ${item.duration}</span>
+                    <span class="trans-cost">¥${item.cost}</span>
                 </div>
-                <div class="day-body">
-                    ${day.attractions.map(a => `
-                        <div class="day-attraction clickable" data-id="${escHtml(a.id || a.name)}">
-                            <span class="day-attr-name">🏛️ ${escHtml(a.name)}</span>
-                            <span class="day-attr-tag">${escHtml(a.type)}</span>
-                            <span class="day-attr-cost">门票 ¥${a.ticket}</span>
-                        </div>
-                    `).join('')}
+            `;
+        } else if (item.type === 'day' || item.day) {
+            const w = item.weather || {};
+            const hasWeather = w.weather_day && w.temp_max;
+            const cityLabel = currentCity && summary.is_multi_city ? `🏙️ ${currentCity} · ` : '';
+            html += `
+                <div class="day-card">
+                    <div class="day-header">
+                        <span>📅 ${cityLabel}第${item.day}天 · ${item.date}</span>
+                        ${hasWeather ? `<span class="day-weather-inline">${weatherIcon(w.weather_day)} ${w.weather_day} ${w.temp_min}°~${w.temp_max}°</span>` : ''}
+                        <span>💰 ¥${item.day_total}</span>
+                    </div>
+                    <div class="day-body">
+                        ${(item.attractions || []).map(a => `
+                            <div class="day-attraction clickable" data-id="${escHtml(a.id || a.name)}">
+                                <span class="day-attr-name">🏛️ ${escHtml(a.name)}</span>
+                                <span class="day-attr-tag">${escHtml(a.type)}</span>
+                                <span class="day-attr-cost">门票 ¥${a.ticket}</span>
+                            </div>
+                        `).join('')}
+                    </div>
+                    <div class="day-footer">
+                        <span>🏨 ${item.hotel} ¥${item.hotel_cost}</span>
+                        <span>🍜 餐饮 ¥${item.food_cost}</span>
+                        <span>🚌 交通 ¥${item.transport_cost}</span>
+                    </div>
+                    <div class="feedback-row">
+                        <button class="feedback-btn" data-action="like" data-day="${item.day}">👍 喜欢</button>
+                        <button class="feedback-btn" data-action="dislike" data-day="${item.day}">👎 不喜欢</button>
+                    </div>
                 </div>
-                <div class="day-footer">
-                    <span>🏨 ${day.hotel} ¥${day.hotel_cost}</span>
-                    <span>🍜 餐饮 ¥${day.food_cost}</span>
-                    <span>🚌 交通 ¥${day.transport_cost}</span>
-                </div>
-                <div class="feedback-row">
-                    <button class="feedback-btn" data-action="like" data-day="${day.day}">👍 喜欢这天</button>
-                    <button class="feedback-btn" data-action="dislike" data-day="${day.day}">👎 不喜欢</button>
-                </div>
-            </div>
-        `;
+            `;
+        }
     });
 
     // 费用明细
@@ -429,16 +605,7 @@ function renderRoute(data, hotelData, budgetLevel) {
         </div>
     `;
 
-    // 未安排景点（如果存在）
-    if (unused_attractions && unused_attractions.length > 0) {
-        html += `
-            <p style="margin-top:12px;font-size:13px;color:#999;text-align:center;">
-                📌 还有 ${unused_attractions.length} 个景点未排入：${unused_attractions.map(a => escHtml(a.name)).join('、')}
-            </p>
-        `;
-    }
-
-    // 地图可视化（使用后端生成的 URL）
+    // 地图
     const mapUrl = data.map_url || '';
     if (mapUrl) {
         html += `
@@ -449,12 +616,12 @@ function renderRoute(data, hotelData, budgetLevel) {
         `;
     }
 
-    // 酒店推荐
+    // 酒店
     if (hotelData && hotelData.hotels && hotelData.hotels.length > 0) {
         html += `
             <div class="hotel-section">
-                <h3>🏨 附近酒店推荐 (${hotelData.budget_level === 'budget' ? '经济型' : hotelData.budget_level === 'luxury' ? '豪华型' : '舒适型'} · ${hotelData.price_range})</h3>
-                ${hotelData.hotels.slice(0, 5).map(h => `
+                <h3>🏨 附近酒店推荐</h3>
+                ${hotelData.hotels.slice(0, 4).map(h => `
                     <div class="hotel-card">
                         <div class="hotel-photo">${h.photo ? `<img src="${h.photo}" alt="" style="width:100%;height:100%;object-fit:cover;border-radius:8px;">` : '🏨'}</div>
                         <div class="hotel-info">
@@ -471,49 +638,48 @@ function renderRoute(data, hotelData, budgetLevel) {
         `;
     }
 
+    // 保存按钮 + 查看完整线路
+    html += `
+        <div class="route-actions">
+            <button id="btn-save-route" class="btn btn-outline">💾 保存路线</button>
+            <button id="btn-fullroute" class="btn btn-primary">📋 查看完整线路</button>
+        </div>
+    `;
+
     routeResult.innerHTML = html;
 
-    // 绑定反馈按钮事件
+    // 保存按钮
+    $('#btn-save-route').addEventListener('click', () => saveRoute());
+    $('#btn-fullroute').addEventListener('click', () => showFullRoute(data));
+
+    // 反馈按钮
     routeResult.querySelectorAll('.feedback-btn').forEach(btn => {
         btn.addEventListener('click', async function() {
             const action = this.dataset.action;
-            const dayNum = this.dataset.day;
-            const dayData = itinerary[parseInt(dayNum) - 1];
+            const allBtns = this.parentElement.querySelectorAll('.feedback-btn');
+            const dayCard = this.closest('.day-card');
+            const names = Array.from(dayCard.querySelectorAll('.day-attr-name'))
+                .map(el => el.textContent.replace('🏛️ ', ''));
 
-            if (!dayData) return;
-
-            // 把该天的所有景点加入偏好
-            for (const attr of dayData.attractions) {
-                const listType = action === 'like' ? 'whitelist' : 'blacklist';
+            for (const name of names) {
                 try {
-                    await api('POST', '/api/preferences', {
-                        name: attr.name,
-                        type: attr.type,
-                        list: listType,
-                    });
-                } catch (err) {
-                    // 已存在的忽略
-                    if (!err.message.includes('已存在')) {
-                        console.error(err);
-                    }
-                }
+                    await api('POST', '/api/preferences', { name, type: '', list: action === 'like' ? 'whitelist' : 'blacklist' });
+                } catch (e) { /* ignore duplicates */ }
             }
 
-            // UI 反馈
-            const allBtns = this.parentElement.querySelectorAll('.feedback-btn');
             allBtns.forEach(b => b.classList.remove('liked', 'disliked'));
             this.classList.add(action === 'like' ? 'liked' : 'disliked');
-
-            const label = action === 'like' ? '白名单' : '黑名单';
-            showToast(`已加入${label}！`, 'success');
+            showToast(`已加入${action === 'like' ? '白名单' : '黑名单'}！`, 'success');
         });
     });
 
-    // 路线中景点点击查看详情
+    // 景点点击查看详情
     routeResult.querySelectorAll('.day-attraction.clickable').forEach(item => {
         item.addEventListener('click', () => {
             const attrId = item.dataset.id;
-            const allAttr = itinerary.flatMap(d => d.attractions);
+            const allAttr = itinerary
+                .filter(i => i.type === 'day' || i.day)
+                .flatMap(i => i.attractions || []);
             const found = allAttr.find(a => (a.id || a.name) === attrId);
             if (found) {
                 openDetail({
@@ -530,7 +696,6 @@ function renderRoute(data, hotelData, budgetLevel) {
         });
     });
 
-    // 滚动到路线结果
     routeResult.scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
@@ -749,6 +914,8 @@ async function init() {
             routeDeparture.placeholder = data.default_city;
         }
         settingCity.value = data.default_city;
+        // 加载已保存路线
+        loadSavedRoutes();
     } catch (err) {
         // 后端未启动时的fallback
         console.warn('无法连接后端，请先启动 backend 服务');

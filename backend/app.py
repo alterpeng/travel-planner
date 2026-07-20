@@ -452,132 +452,66 @@ def get_weather():
         return jsonify({"error": f"请求失败：{str(e)}"}), 500
 
 
-# ----- 路线生成 -----
-@app.route("/api/route/generate", methods=["POST"])
-def generate_route():
-    """
-    生成旅游路线
-    Body JSON:
-    {
-        "destination": "杭州",     // 目的地（必填）
-        "days": 3,                // 天数（可选，不填自动推荐）
-        "budget": 3000,           // 总预算（元）
-        "departure": "上海"        // 出发城市（可选，默认使用配置中的城市）
-    }
-    """
-    data = request.get_json() or {}
-    destination = data.get("destination", "").strip()
-    days_input = data.get("days")  # 可能为 None
-    budget = data.get("budget", 0) or 0
-    departure = data.get("departure", "").strip()
+# ----- 路线生成（支持多城市串联）-----
 
-    if not destination:
-        return jsonify({"error": "请输入目的地城市"}), 400
-
-    # 默认出发城市
-    if not departure:
-        config = get_config()
-        departure = config.get("default_city", "北京")
-
-    key = get_amap_key()
-    if not key:
-        return jsonify({"error": "请先设置高德地图 API Key"}), 500
-
-    # 获取偏好
-    prefs = get_preferences()
-    whitelist_names = {item["name"] for item in prefs.get("whitelist", [])}
-    whitelist_types = {item.get("type", "") for item in prefs.get("whitelist", [])}
-    blacklist_names = {item["name"] for item in prefs.get("blacklist", [])}
-    blacklist_types = {item.get("type", "") for item in prefs.get("blacklist", [])}
-
-    # 搜索目的地景点（单次请求优化，避免超时）
+def search_city_attractions(city, key, whitelist_names, whitelist_types, blacklist_names, blacklist_types):
+    """搜索单个城市的景点并应用偏好过滤"""
     all_attractions = []
-    # 一次搜索覆盖多个关键词，减少 API 调用次数
     try:
         params = {
             "key": key,
-            "keywords": "旅游景点",  # 高德 POI 会匹配各类景点
-            "city": destination,
+            "keywords": "旅游景点",
+            "city": city,
             "types": "风景名胜|公园|博物馆|纪念馆|寺庙道观|游乐园|动物园|植物园|温泉|海滩|山峰|湖泊|古镇|国家级景点|省级景点|知名景点",
-            "offset": 25,
+            "offset": 15,
             "page": 1,
             "extensions": "all",
         }
         result = safe_request("https://restapi.amap.com/v3/place/text", params, timeout=15)
         if result.get("status") == "1":
             for poi in result.get("pois", []):
+                poi_type = poi.get("type", "").split(";")[0] if poi.get("type") else ""
+                poi_name = poi.get("name", "")
+
+                # 黑名单过滤
+                if poi_name in blacklist_names or poi_type in blacklist_types:
+                    continue
+
+                # 白名单加分
+                boost = 0
+                if poi_name in whitelist_names:
+                    boost += 10
+                if poi_type in whitelist_types:
+                    boost += 5
+
                 all_attractions.append({
                     "id": poi.get("id"),
-                    "name": poi.get("name"),
+                    "name": poi_name,
                     "address": poi.get("address"),
-                    "type": poi.get("type", "").split(";")[0] if poi.get("type") else "",
+                    "type": poi_type,
+                    "city": city,
                     "location": poi.get("location", ""),
                     "rating": poi.get("biz_ext", {}).get("rating", ""),
                     "cost": estimate_ticket(poi.get("type", "")),
+                    "boost": boost,
                 })
     except Exception:
-        pass  # API 失败时返回空列表，下方会处理
+        pass
 
-    if not all_attractions:
-        return jsonify({"error": f"在「{destination}」未找到景点信息"}), 404
+    # 排序
+    all_attractions.sort(key=lambda x: x["boost"] + (float(x["rating"]) if x["rating"] else 0), reverse=True)
+    return all_attractions
 
-    # 应用黑白名单过滤
-    filtered = []
-    for attr in all_attractions:
-        # 黑名单过滤（名字匹配 或 类型匹配）
-        if attr["name"] in blacklist_names:
-            continue
-        if attr["type"] in blacklist_types:
-            continue
 
-        # 白名单加分
-        boost = 0
-        if attr["name"] in whitelist_names:
-            boost += 10
-        if attr["type"] in whitelist_types:
-            boost += 5
-
-        attr["boost"] = boost
-        filtered.append(attr)
-
-    # 按热度 + 白名单加成排序
-    filtered.sort(key=lambda x: x["boost"] + (float(x["rating"]) if x["rating"] else 0), reverse=True)
-
-    # 确定天数
-    if days_input and days_input > 0:
-        days = days_input
-    else:
-        # 自动推荐：按每天 2-3 个景点计算
-        days = max(1, min(7, len(filtered) // 3 + 1))
-
-    # 每日景点数
-    per_day = min(3, max(2, len(filtered) // days + 1))
-    total_attractions_used = min(len(filtered), days * per_day)
-    used_attractions = filtered[:total_attractions_used]
-
-    # 计算预算
-    if budget > 0:
-        budget_per_day = budget / days
-    else:
-        budget_per_day = 500  # 默认
-
-    hotel_level, hotel_cost = estimate_accommodation(budget_per_day)
-    food_cost = 80  # 每人每天餐饮
-    transport_inner = 50  # 市内交通每天
-    transport_intercity = 200  # 城际交通估算
-
-    # 获取目的地天气预报
-    weather_forecasts = {}
+def fetch_weather(city, key):
+    """获取城市天气预报"""
+    forecasts = {}
     try:
-        weather_params = {
-            "key": key,
-            "city": destination,
-            "extensions": "all",
-        }
-        weather_data = safe_request("https://restapi.amap.com/v3/weather/weatherInfo", weather_params, timeout=10)
-        if weather_data.get("status") == "1" and "forecasts" in weather_data:
-            for cast in weather_data["forecasts"][0].get("casts", []):
-                weather_forecasts[cast.get("date")] = {
+        params = {"key": key, "city": city, "extensions": "all"}
+        data = safe_request("https://restapi.amap.com/v3/weather/weatherInfo", params, timeout=10)
+        if data.get("status") == "1" and "forecasts" in data:
+            for cast in data["forecasts"][0].get("casts", []):
+                forecasts[cast.get("date")] = {
                     "weather_day": cast.get("dayweather", ""),
                     "weather_night": cast.get("nightweather", ""),
                     "temp_max": cast.get("daytemp", ""),
@@ -586,80 +520,247 @@ def generate_route():
                     "wind_scale": cast.get("daypower", ""),
                 }
     except Exception:
-        pass  # 天气获取失败不影响路线生成
+        pass
+    return forecasts
 
-    # 分配每日行程
+
+def estimate_intercity_transport(from_city, to_city):
+    """估算城际交通方式与费用"""
+    # 基于距离的经验估算
+    distance_map = {
+        ("北京","天津"): (120, "高铁", 55, "0.5小时"),
+        ("北京","上海"): (1200, "高铁", 550, "4.5小时"),
+        ("北京","杭州"): (1300, "高铁", 580, "5小时"),
+        ("上海","杭州"): (170, "高铁", 75, "1小时"),
+        ("上海","南京"): (300, "高铁", 140, "1.5小时"),
+        ("上海","苏州"): (100, "高铁", 40, "0.5小时"),
+        ("杭州","苏州"): (200, "高铁", 110, "1.5小时"),
+        ("杭州","南京"): (280, "高铁", 130, "1.5小时"),
+        ("南京","苏州"): (220, "高铁", 100, "1小时"),
+        ("广州","深圳"): (140, "高铁", 75, "0.5小时"),
+        ("成都","重庆"): (300, "高铁", 150, "1.5小时"),
+        ("西安","洛阳"): (380, "高铁", 175, "1.5小时"),
+    }
+
+    pair1 = (from_city, to_city)
+    pair2 = (to_city, from_city)
+
+    if pair1 in distance_map:
+        dist, mode, cost, duration = distance_map[pair1]
+    elif pair2 in distance_map:
+        dist, mode, cost, duration = distance_map[pair2]
+    else:
+        # 默认估算
+        dist, mode, cost, duration = 500, "高铁", 200, "3小时"
+
+    return {"from": from_city, "to": to_city, "distance_km": dist,
+            "mode": mode, "cost": cost, "duration": duration}
+
+
+@app.route("/api/route/generate", methods=["POST"])
+def generate_route():
+    """
+    生成旅游路线（支持多城市串联）
+    Body JSON:
+    {
+        "destination": "杭州,苏州,南京",  // 多城市用逗号分隔
+        "days": 6,
+        "budget": 5000,
+        "departure": "上海"
+    }
+    """
+    data = request.get_json() or {}
+    destination = data.get("destination", "").strip()
+    days_input = data.get("days")
+    budget = data.get("budget", 0) or 0
+    departure = data.get("departure", "").strip()
+
+    if not destination:
+        return jsonify({"error": "请输入目的地城市"}), 400
+
+    # 解析多城市
+    cities = [c.strip() for c in destination.replace("，", ",").split(",") if len(c.strip()) >= 2]
+    if not cities:
+        return jsonify({"error": "请输入有效的城市名称"}), 400
+    is_multi_city = len(cities) > 1
+
+    if not departure:
+        config = get_config()
+        departure = config.get("default_city", "北京")
+
+    key = get_amap_key()
+    if not key:
+        return jsonify({"error": "请先设置高德地图 API Key"}), 500
+
+    # 偏好
+    prefs = get_preferences()
+    whitelist_names = {item["name"] for item in prefs.get("whitelist", [])}
+    whitelist_types = {item.get("type", "") for item in prefs.get("whitelist", [])}
+    blacklist_names = {item["name"] for item in prefs.get("blacklist", [])}
+    blacklist_types = {item.get("type", "") for item in prefs.get("blacklist", [])}
+
+    # 搜索每个城市的景点
+    city_attractions = {}
+    all_attractions_flat = []
+    for city in cities:
+        attrs = search_city_attractions(city, key, whitelist_names, whitelist_types, blacklist_names, blacklist_types)
+        city_attractions[city] = attrs
+        all_attractions_flat.extend(attrs)
+
+    if not all_attractions_flat:
+        return jsonify({"error": f"在「{destination}」未找到景点信息"}), 404
+
+    # 确定天数分配
+    if days_input and days_input > 0:
+        total_days = days_input
+    else:
+        total_per_city = [max(1, min(5, len(city_attractions[c]) // 3 + 1)) for c in cities]
+        total_days = sum(total_per_city)
+
+    if is_multi_city:
+        # 按景点数量比例分配天数
+        total_attr_count = sum(len(city_attractions[c]) for c in cities)
+        days_per_city = []
+        remaining = total_days
+        for i, city in enumerate(cities):
+            if i == len(cities) - 1:
+                d = max(1, remaining)
+            else:
+                ratio = len(city_attractions[city]) / max(1, total_attr_count)
+                d = max(1, min(remaining - (len(cities) - i - 1), round(total_days * ratio)))
+            days_per_city.append(d)
+            remaining -= d
+    else:
+        days_per_city = [total_days]
+
+    # 计算预算
+    if budget > 0:
+        budget_per_day = budget / max(1, total_days)
+    else:
+        budget_per_day = 500
+
+    hotel_level, hotel_cost = estimate_accommodation(budget_per_day)
+    food_cost = 80
+    transport_inner = 50
+
+    # 城际交通
+    intercity_transports = []
+    intercity_total = 0
+    all_routes = [departure] + cities
+    for i in range(len(all_routes) - 1):
+        trans = estimate_intercity_transport(all_routes[i], all_routes[i + 1])
+        intercity_transports.append(trans)
+        intercity_total += trans["cost"]
+
+    # 构建行程
     itinerary = []
-    total_cost = transport_intercity  # 城际交通
+    total_cost = intercity_total
+    day_counter = 0
+    all_used = []
+    all_locations = []
 
-    for d in range(days):
-        day_attrs = used_attractions[d * per_day : (d + 1) * per_day]
-        day_ticket = sum(a["cost"] for a in day_attrs)
-        day_cost = hotel_cost + food_cost + transport_inner + day_ticket
-        day_date = (datetime.now() + timedelta(days=d)).strftime("%Y-%m-%d")
-        day_weather = weather_forecasts.get(day_date, {})
+    for ci, city in enumerate(cities):
+        city_attrs = city_attractions[city]
+        city_days = days_per_city[ci]
+        per_day = min(3, max(2, len(city_attrs) // max(1, city_days) + 1))
+        used_count = min(len(city_attrs), city_days * per_day)
+        used = city_attrs[:used_count]
+        all_used.extend(used)
 
-        itinerary.append({
-            "day": d + 1,
-            "date": (datetime.now() + timedelta(days=d)).strftime("%m月%d日"),
-            "weather": {
-                "weather_day": day_weather.get("weather_day", ""),
-                "weather_night": day_weather.get("weather_night", ""),
-                "temp_max": day_weather.get("temp_max", ""),
-                "temp_min": day_weather.get("temp_min", ""),
-                "wind_dir": day_weather.get("wind_dir", ""),
-                "wind_scale": day_weather.get("wind_scale", ""),
-            },
-            "attractions": [
-                {
-                    "id": a["id"],
-                    "name": a["name"],
-                    "type": a["type"],
-                    "address": a["address"],
-                    "ticket": a["cost"],
-                    "location": a["location"],
-                    "rating": a["rating"],
-                }
-                for a in day_attrs
-            ],
-            "hotel": hotel_level,
-            "hotel_cost": hotel_cost,
-            "food_cost": food_cost,
-            "transport_cost": transport_inner,
-            "ticket_total": day_ticket,
-            "day_total": day_cost,
-        })
-        total_cost += day_cost
+        # 天气
+        weather_fc = fetch_weather(city, key)
+
+        # 城市分隔标记
+        if is_multi_city:
+            itinerary.append({
+                "type": "city_header",
+                "city": city,
+                "day_start": day_counter + 1,
+            })
+
+        # 城市内每日行程
+        for d in range(city_days):
+            day_attrs = used[d * per_day : (d + 1) * per_day]
+            if not day_attrs:
+                continue
+            day_ticket = sum(a["cost"] for a in day_attrs)
+            day_cost = hotel_cost + food_cost + transport_inner + day_ticket
+            day_counter += 1
+            day_date = (datetime.now() + timedelta(days=day_counter - 1)).strftime("%Y-%m-%d")
+            day_weather = weather_fc.get(day_date, {})
+            for a in day_attrs:
+                if a.get("location"):
+                    all_locations.append(a["location"])
+
+            itinerary.append({
+                "type": "day",
+                "day": day_counter,
+                "date": (datetime.now() + timedelta(days=day_counter - 1)).strftime("%m月%d日"),
+                "city": city,
+                "weather": {
+                    "weather_day": day_weather.get("weather_day", ""),
+                    "weather_night": day_weather.get("weather_night", ""),
+                    "temp_max": day_weather.get("temp_max", ""),
+                    "temp_min": day_weather.get("temp_min", ""),
+                    "wind_dir": day_weather.get("wind_dir", ""),
+                    "wind_scale": day_weather.get("wind_scale", ""),
+                },
+                "attractions": [
+                    {"id": a["id"], "name": a["name"], "type": a["type"],
+                     "address": a["address"], "ticket": a["cost"],
+                     "location": a["location"], "rating": a["rating"]}
+                    for a in day_attrs
+                ],
+                "hotel": hotel_level,
+                "hotel_cost": hotel_cost,
+                "food_cost": food_cost,
+                "transport_cost": transport_inner,
+                "ticket_total": day_ticket,
+                "day_total": day_cost,
+            })
+            total_cost += day_cost
+
+        # 城市间交通
+        if ci < len(cities) - 1:
+            trans = intercity_transports[ci + 1]  # +1 because first transport is departure→city1
+            itinerary.append({
+                "type": "transport",
+                "from_city": city,
+                "to_city": cities[ci + 1],
+                "mode": trans["mode"],
+                "cost": trans["cost"],
+                "duration": trans["duration"],
+            })
 
     # 总览
     summary = {
         "departure": departure,
         "destination": destination,
-        "days": days,
+        "cities": cities,
+        "is_multi_city": is_multi_city,
+        "days": total_days,
         "total_budget": budget if budget > 0 else total_cost,
         "total_estimated": total_cost,
         "cost_breakdown": {
-            "transport_intercity": transport_intercity,
-            "hotel": hotel_cost * days,
-            "food": food_cost * days,
-            "transport_inner": transport_inner * days,
-            "tickets": sum(a["cost"] for a in used_attractions),
+            "transport_intercity": intercity_total,
+            "hotel": hotel_cost * total_days,
+            "food": food_cost * total_days,
+            "transport_inner": transport_inner * total_days,
+            "tickets": sum(a["cost"] for a in all_used),
         },
         "budget_fit": "在预算范围内" if budget == 0 or total_cost <= budget else f"超出预算 ¥{total_cost - budget}",
+        "intercity_transports": intercity_transports,
     }
 
-    # 生成静态地图 URL
+    # 地图 URL（多城市用较小的 zoom）
     map_url = ""
-    locations = [a["location"] for a in used_attractions if a.get("location")]
-    if len(locations) >= 1:
-        loc_str = "|".join(locations[:10])
-        # 起点用特殊标记
-        first_loc = locations[0]
+    if all_locations:
+        loc_str = "|".join(all_locations[:15])
         map_url = (
             f"https://restapi.amap.com/v3/staticmap?key={key}"
             f"&locations={loc_str}"
-            f"&size=800*300&scale=2&zoom=12"
-            f"&markers=mid,0xFF6B35,A:{first_loc}"
+            f"&size=800*350&scale=2&zoom={'7' if is_multi_city else '12'}"
+            f"&markers=mid,0xFF6B35,A:{all_locations[0]}"
         )
 
     return jsonify({
@@ -667,11 +768,85 @@ def generate_route():
         "itinerary": itinerary,
         "hotel_level": hotel_level,
         "map_url": map_url,
-        "unused_attractions": [
-            {"name": a["name"], "type": a["type"]} for a in filtered[total_attractions_used:total_attractions_used + 5]
-        ],
-        "blacklist_filtered": len(all_attractions) - len(filtered),
+        "blacklist_filtered": 0,
     })
+
+
+# ----- 行程保存 -----
+SAVED_ROUTES_FILE = os.path.join(DATA_DIR, "saved_routes.json")
+
+
+def get_saved_routes():
+    return read_json(SAVED_ROUTES_FILE, {"routes": []})
+
+
+def save_saved_routes(data):
+    write_json(SAVED_ROUTES_FILE, data)
+
+
+@app.route("/api/routes/saved")
+def list_saved_routes():
+    """列出已保存的路线"""
+    data = get_saved_routes()
+    # 按时间倒序，只返回摘要
+    routes = sorted(data.get("routes", []), key=lambda r: r.get("saved_at", ""), reverse=True)
+    summaries = [{
+        "id": r["id"],
+        "name": r.get("name", ""),
+        "destination": r.get("destination", ""),
+        "days": r.get("days", 0),
+        "budget": r.get("budget", 0),
+        "saved_at": r.get("saved_at", ""),
+    } for r in routes]
+    return jsonify({"routes": summaries})
+
+
+@app.route("/api/routes/saved", methods=["POST"])
+def save_route():
+    """保存路线"""
+    data = request.get_json() or {}
+    route_data = data.get("route_data", {})
+    name = data.get("name", "").strip()
+
+    if not route_data:
+        return jsonify({"error": "缺少路线数据"}), 400
+
+    if not name:
+        summary = route_data.get("summary", {})
+        name = summary.get("destination", "未命名路线")
+
+    routes_data = get_saved_routes()
+    route_entry = {
+        "id": str(uuid.uuid4())[:8],
+        "name": name,
+        "destination": route_data.get("summary", {}).get("destination", ""),
+        "days": route_data.get("summary", {}).get("days", 0),
+        "budget": route_data.get("summary", {}).get("total_budget", 0),
+        "route_data": route_data,
+        "saved_at": datetime.now().isoformat(),
+    }
+    routes_data.setdefault("routes", []).insert(0, route_entry)
+    save_saved_routes(routes_data)
+    return jsonify({"message": "路线已保存", "id": route_entry["id"]})
+
+
+@app.route("/api/routes/saved/<route_id>")
+def get_saved_route(route_id):
+    """获取单条已保存路线"""
+    routes_data = get_saved_routes()
+    for r in routes_data.get("routes", []):
+        if r["id"] == route_id:
+            return jsonify(r["route_data"])
+    return jsonify({"error": "路线不存在"}), 404
+
+
+@app.route("/api/routes/saved/<route_id>", methods=["DELETE"])
+def delete_saved_route(route_id):
+    """删除已保存路线"""
+    routes_data = get_saved_routes()
+    routes_data["routes"] = [r for r in routes_data.get("routes", []) if r["id"] != route_id]
+    save_saved_routes(routes_data)
+    return jsonify({"message": "路线已删除"})
 
 
 # ----- 偏好管理 -----
