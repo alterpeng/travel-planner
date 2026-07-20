@@ -94,6 +94,12 @@ def estimate_ticket(attraction_type):
             return round((low + high) / 2)
     return 50  # 默认估算
 
+def stable_hash(s, min_val, max_val):
+    """根据字符串生成稳定的哈希值，映射到 [min_val, max_val] 区间"""
+    h = sum(ord(c) * (i + 1) for i, c in enumerate(s[:20]))
+    return min_val + (h % (max_val - min_val + 1))
+
+
 def estimate_accommodation(budget_per_day):
     """根据预算估算住宿等级"""
     if budget_per_day < 300:
@@ -338,11 +344,8 @@ def search_hotels():
             rating = biz.get("rating", "")
             cost = biz.get("cost", "")
 
-            # 估算价格
-            try:
-                est_cost = float(cost) if cost else (low + high) // 2
-            except ValueError:
-                est_cost = (low + high) // 2
+            # 稳定价格：用酒店ID生成固定价格，同酒店不会变
+            est_cost = stable_hash(poi.get("id", ""), low, high)
 
             hotels.append({
                 "id": poi.get("id"),
@@ -684,8 +687,8 @@ def generate_route():
             if not day_attrs:
                 continue
             day_ticket = sum(a["cost"] for a in day_attrs)
-            day_cost = hotel_cost + food_cost + transport_inner + day_ticket
             day_counter += 1
+            day_cost = hotel_cost + food_cost + transport_inner + day_ticket
             day_date = (datetime.now() + timedelta(days=day_counter - 1)).strftime("%Y-%m-%d")
             day_weather = weather_fc.get(day_date, {})
             for a in day_attrs:
@@ -752,22 +755,40 @@ def generate_route():
         "intercity_transports": intercity_transports,
     }
 
-    # 地图 URL（多城市用较小的 zoom）
+    # 地图 URL —— 路径连线 + 编号标注
     map_url = ""
+    nav_url = ""
     if all_locations:
         loc_str = "|".join(all_locations[:15])
+        # 编号标注：每个景点标序号
+        labels = []
+        for i, loc in enumerate(all_locations[:10]):
+            labels.append(f"mid,0xFF6B35,{i+1}:{loc}")
+        marker_str = "|".join(labels)
+        # 路径连线
+        path_str = "0x3366FF,0.7,0,0x3366FF33:" + ";".join(all_locations[:15])
         map_url = (
             f"https://restapi.amap.com/v3/staticmap?key={key}"
             f"&locations={loc_str}"
             f"&size=800*350&scale=2&zoom={'7' if is_multi_city else '12'}"
-            f"&markers=mid,0xFF6B35,A:{all_locations[0]}"
+            f"&markers={marker_str}"
+            f"&path={path_str}"
         )
+        # 高德导航链接（浏览器打开）
+        if len(all_locations) >= 2:
+            nav_from = f"{all_locations[0]}"
+            nav_to = f"{all_locations[-1]}"
+            nav_url = f"https://uri.amap.com/navigation?from={nav_from},起点&to={nav_to},终点&mode=car"
+            if len(all_locations) > 2:
+                via = ";".join(all_locations[1:-1][:5])
+                nav_url += f"&via={via}"
 
     return jsonify({
         "summary": summary,
         "itinerary": itinerary,
         "hotel_level": hotel_level,
         "map_url": map_url,
+        "nav_url": nav_url,
         "blacklist_filtered": 0,
     })
 

@@ -494,9 +494,12 @@ btnGenerate.addEventListener('click', async () => {
     }
 });
 
+let currentHotelLevel = '';
+
 function renderRoute(data, hotelData, budgetLevel) {
     currentRouteData = data;
     const { summary, itinerary, hotel_level } = data;
+    currentHotelLevel = hotel_level;
 
     let html = '';
 
@@ -575,7 +578,7 @@ function renderRoute(data, hotelData, budgetLevel) {
                         `).join('')}
                     </div>
                     <div class="day-footer">
-                        <span>🏨 ${item.hotel} ¥${item.hotel_cost}</span>
+                        <span class="hotel-toggle" data-day="${item.day}" data-cost="${item.hotel_cost}">🏨 ${item.hotel} ¥${item.hotel_cost} <small style="color:var(--primary);cursor:pointer;">[不住]</small></span>
                         <span>🍜 餐饮 ¥${item.food_cost}</span>
                         <span>🚌 交通 ¥${item.transport_cost}</span>
                     </div>
@@ -603,13 +606,30 @@ function renderRoute(data, hotelData, budgetLevel) {
         </div>
     `;
 
+    // 完整线路时间线（内联显示）
+    html += '<h3 style="margin-top:16px;margin-bottom:8px;">📋 完整线路</h3>';
+    html += '<div class="timeline" style="margin-bottom:12px;">';
+    itinerary.forEach(item => {
+        if (item.type === 'city_header') {
+            html += `<div class="timeline-item city-header"><span class="city-badge">🏙️ ${escHtml(item.city)}</span></div>`;
+        } else if (item.type === 'transport') {
+            html += `<div class="timeline-item transport"><div class="transport-badge"><span class="trans-icon">🚄</span><span class="trans-info">${escHtml(item.from_city)} → ${escHtml(item.to_city)} · ${item.mode} ${item.duration}</span><span class="trans-cost">¥${item.cost}</span></div></div>`;
+        } else if (item.type === 'day' || item.day) {
+            const w = item.weather || {};
+            html += `<div class="timeline-item"><div class="timeline-day"><div class="td-header">📅 第${item.day}天 · ${item.date} ${w.weather_day ? `· ${weatherIcon(w.weather_day)} ${w.weather_day}` : ''}</div><div class="td-spots">${(item.attractions || []).map(a => `<span>${escHtml(a.name)}</span>`).join('')}</div></div></div>`;
+        }
+    });
+    html += '</div>';
+
     // 地图
     const mapUrl = data.map_url || '';
+    const navUrl = data.nav_url || '';
     if (mapUrl) {
         html += `
             <div class="map-container" style="margin-top:16px;">
-                <h3 style="margin-bottom:8px;">🗺️ 路线地图</h3>
+                <h3 style="margin-bottom:8px;">🗺️ 路线地图（编号对应上方景点）</h3>
                 <img src="${mapUrl}" alt="路线地图" loading="lazy" onerror="this.parentElement.style.display='none'">
+                ${navUrl ? `<a href="${navUrl}" target="_blank" class="btn btn-primary btn-block" style="margin-top:8px;">🗺️ 在高德地图中打开导航</a>` : ''}
             </div>
         `;
     }
@@ -691,6 +711,25 @@ function renderRoute(data, hotelData, budgetLevel) {
                     photo: '',
                 });
             }
+        });
+    });
+
+    // 酒店切换：点击 [不住] 切���当天酒店费用
+    routeResult.querySelectorAll('.hotel-toggle small').forEach(btn => {
+        btn.addEventListener('click', function(e) {
+            e.stopPropagation();
+            const span = this.parentElement;
+            const originalCost = parseInt(span.dataset.cost);
+            const isOff = span.classList.toggle('hotel-off');
+            if (isOff) {
+                span.innerHTML = `🏠 不住 ¥0 <small style="color:var(--success);cursor:pointer;">[恢复]</small>`;
+                span.dataset.currentCost = '0';
+            } else {
+                span.innerHTML = `🏨 ${currentHotelLevel || '酒店'} ¥${originalCost} <small style="color:var(--primary);cursor:pointer;">[不住]</small>`;
+                span.dataset.currentCost = originalCost.toString();
+            }
+            span.dataset.cost = originalCost.toString();
+            recalcRouteTotal();
         });
     });
 
@@ -901,6 +940,33 @@ document.addEventListener('click', (e) => {
         }
     }
 });
+
+// ========== 重算路线总费用 ==========
+function recalcRouteTotal() {
+    let total = 0;
+    let hotelTotal = 0;
+    routeResult.querySelectorAll('.day-footer').forEach(footer => {
+        const hotelSpan = footer.querySelector('.hotel-toggle');
+        const costSpans = footer.querySelectorAll('span:not(.hotel-toggle)');
+        if (hotelSpan) {
+            hotelTotal += parseInt(hotelSpan.dataset.currentCost || hotelSpan.dataset.cost || '0');
+        }
+        costSpans.forEach(s => {
+            const m = s.textContent.match(/¥(\d+)/);
+            if (m) total += parseInt(m[1]);
+        });
+    });
+    // Update summary total
+    const summaryVal = routeResult.querySelector('.summary-val');
+    // Actually, just update the budget_fit and total in cost breakdown
+    const totalRow = routeResult.querySelector('.cost-row:last-child span:last-child');
+    if (totalRow) {
+        const intercityMatch = routeResult.innerHTML.match(/城际交通.*?¥(\d+)/);
+        const intercity = intercityMatch ? parseInt(intercityMatch[1]) : 0;
+        const newTotal = intercity + hotelTotal + total;
+        totalRow.textContent = `¥${newTotal}`;
+    }
+}
 
 // ========== 初始加载 ==========
 async function init() {
