@@ -254,10 +254,13 @@ function renderRoute(data) {
 
     // 每天行程
     itinerary.forEach(day => {
+        const w = day.weather || {};
+        const hasWeather = w.weather_day && w.temp_max;
         html += `
             <div class="day-card">
                 <div class="day-header">
                     <span>📅 第${day.day}天 · ${day.date}</span>
+                    ${hasWeather ? `<span class="day-weather-inline">${weatherIcon(w.weather_day)} ${w.weather_day} ${w.temp_min}°~${w.temp_max}° 🌬️${w.wind_dir}${w.wind_scale}级</span>` : ''}
                     <span>💰 ¥${day.day_total}</span>
                 </div>
                 <div class="day-body">

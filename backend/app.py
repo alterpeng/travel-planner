@@ -425,6 +425,28 @@ def generate_route():
     transport_inner = 50  # 市内交通每天
     transport_intercity = 200  # 城际交通估算
 
+    # 获取目的地天气预报
+    weather_forecasts = {}
+    try:
+        weather_params = {
+            "key": key,
+            "city": destination,
+            "extensions": "all",
+        }
+        weather_data = safe_request("https://restapi.amap.com/v3/weather/weatherInfo", weather_params, timeout=10)
+        if weather_data.get("status") == "1" and "forecasts" in weather_data:
+            for cast in weather_data["forecasts"][0].get("casts", []):
+                weather_forecasts[cast.get("date")] = {
+                    "weather_day": cast.get("dayweather", ""),
+                    "weather_night": cast.get("nightweather", ""),
+                    "temp_max": cast.get("daytemp", ""),
+                    "temp_min": cast.get("nighttemp", ""),
+                    "wind_dir": cast.get("daywind", ""),
+                    "wind_scale": cast.get("daypower", ""),
+                }
+    except Exception:
+        pass  # 天气获取失败不影响路线生成
+
     # 分配每日行程
     itinerary = []
     total_cost = transport_intercity  # 城际交通
@@ -433,10 +455,20 @@ def generate_route():
         day_attrs = used_attractions[d * per_day : (d + 1) * per_day]
         day_ticket = sum(a["cost"] for a in day_attrs)
         day_cost = hotel_cost + food_cost + transport_inner + day_ticket
+        day_date = (datetime.now() + timedelta(days=d)).strftime("%Y-%m-%d")
+        day_weather = weather_forecasts.get(day_date, {})
 
         itinerary.append({
             "day": d + 1,
             "date": (datetime.now() + timedelta(days=d)).strftime("%m月%d日"),
+            "weather": {
+                "weather_day": day_weather.get("weather_day", ""),
+                "weather_night": day_weather.get("weather_night", ""),
+                "temp_max": day_weather.get("temp_max", ""),
+                "temp_min": day_weather.get("temp_min", ""),
+                "wind_dir": day_weather.get("wind_dir", ""),
+                "wind_scale": day_weather.get("wind_scale", ""),
+            },
             "attractions": [
                 {
                     "name": a["name"],
