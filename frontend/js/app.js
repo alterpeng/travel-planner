@@ -175,7 +175,8 @@ function openDetail(attraction) {
     currentDetailAttraction = attraction;
     detailName.textContent = attraction.name;
     detailRating.textContent = attraction.rating || '暂无';
-    detailCost.textContent = attraction.estimated_cost ? `约 ¥${attraction.estimated_cost}` : '暂无';
+    detailCost.textContent = formatTicketText(attraction);
+    detailCost.title = attraction.ticket_source || '';
     detailTime.textContent = '加载中...';
     detailPhone.textContent = '加载中...';
     detailAddress.textContent = attraction.address || '';
@@ -191,6 +192,8 @@ function openDetail(attraction) {
         .then(d => {
             detailTime.textContent = d.open_time || '暂无';
             detailPhone.textContent = d.phone || '暂无';
+            detailCost.textContent = formatTicketText(d);
+            detailCost.title = d.ticket_source || '';
             if (d.photos && d.photos.length > 0) {
                 detailPhotos.innerHTML = d.photos.map(url =>
                     `<img src="${url}" alt="" onerror="this.style.display='none'">`
@@ -429,7 +432,7 @@ function renderSearchResults(attractions) {
                 <div class="result-address">📍 ${escHtml(a.address || a.city || '')}</div>
                 <div class="result-meta">
                     ${a.rating ? `<span>⭐ ${a.rating}</span>` : ''}
-                    <span>💰 门票约 ¥${a.estimated_cost}</span>
+                    <span title="${escHtml(a.ticket_source || '')}">🎫 ${formatTicketText(a)}</span>
                 </div>
             </div>
         </div>
@@ -449,6 +452,35 @@ function escHtml(str) {
     const div = document.createElement('div');
     div.textContent = str;
     return div.innerHTML;
+}
+
+function formatTicketText(attraction) {
+    const price = Number(attraction.estimated_cost ?? attraction.ticket ?? attraction.cost ?? 0);
+    const confirmed = Boolean(attraction.cost_confirmed);
+    if (confirmed && price === 0) return '免费（需预约时以官方为准）';
+    if (confirmed) return `¥${price}（挂牌价参考）`;
+    if (price > 0) return `约 ¥${price}`;
+    return '票价待确认';
+}
+
+function isMobileBrowser() {
+    return /Android|iPhone|iPad|iPod|HarmonyOS/i.test(navigator.userAgent);
+}
+
+function openMobileAppWithFallback(appUrl, webUrl) {
+    let fallbackTimer = null;
+    const cancelFallback = () => {
+        if (document.hidden && fallbackTimer) {
+            clearTimeout(fallbackTimer);
+            fallbackTimer = null;
+        }
+    };
+    document.addEventListener('visibilitychange', cancelFallback, { once: true });
+    window.location.href = appUrl;
+    fallbackTimer = setTimeout(() => {
+        document.removeEventListener('visibilitychange', cancelFallback);
+        if (!document.hidden) window.location.href = webUrl;
+    }, 1400);
 }
 
 // ========== 首页 - 路线生成 ==========
@@ -583,7 +615,7 @@ function renderRoute(data, hotelData, guideData, budgetLevel) {
                             <div class="day-attraction clickable" data-id="${escHtml(a.id || a.name)}">
                                 <span class="day-attr-name">🏛️ ${escHtml(a.name)}</span>
                                 <span class="day-attr-tag">${escHtml(a.type)}</span>
-                                <span class="day-attr-cost">${a.ticket === 0 ? '🆓 免费' : (a.cost_confirmed ? '🎫 ¥' + a.ticket : '🎫 约¥' + a.ticket)}</span>
+                                <span class="day-attr-cost" title="${escHtml(a.ticket_source || '')}">🎫 ${formatTicketText(a)}</span>
                             </div>
                         `).join('')}
                     </div>
@@ -631,17 +663,30 @@ function renderRoute(data, hotelData, guideData, budgetLevel) {
     });
     html += '</div>';
 
-    // 地图（代理加载 + 直接打开链接双保险）
-    const mapUrl = data.map_url || '';
+    // 地图由本站代理生成；加入刷新标识，避免浏览器缓存曾经的错误响应。
+    const routePoints = itinerary
+        .filter(item => item.type === 'day' || item.day)
+        .flatMap(item => item.attractions || [])
+        .map(item => item.location)
+        .filter(Boolean)
+        .slice(0, 10);
+    let mapUrl = data.map_image_url || data.map_url || '';
+    // 兼容修复前保存的旧路线：旧数据含错误的高德静态图参数，按坐标重建代理地址。
+    if (routePoints.length && (!mapUrl || mapUrl.includes('restapi.amap.com/v3/staticmap'))) {
+        mapUrl = `/api/map-image?points=${encodeURIComponent(routePoints.join('|'))}`;
+    }
     const navUrl = data.nav_url || '';
     if (mapUrl) {
-        const proxyUrl = `/api/map-image?url=${encodeURIComponent(mapUrl)}`;
+        const refreshedMapUrl = `${mapUrl}${mapUrl.includes('?') ? '&' : '?'}refresh=${Date.now()}`;
         html += `
             <div class="map-container" style="margin-top:16px;">
                 <h3 style="margin-bottom:8px;">🗺️ 路线地图</h3>
-                <img src="${proxyUrl}" alt="路线地图" style="width:100%;" onerror="this.outerHTML='<a href=\\'${mapUrl}\\' target=\\'_blank\\' class=\\'btn btn-outline btn-block\\' style=\\'margin:12px 0\\'>🗺️ 点击查看路线地图（新窗口打开）</a>'">
-                <a href="${mapUrl}" target="_blank" class="link-sm" style="display:block;text-align:center;margin:6px 0;">📌 地图加载不出？点此直接打开</a>
-                ${navUrl ? `<a href="${navUrl}" target="_blank" class="btn btn-primary btn-block" style="margin-top:8px;">🗺️ 在高德地图中打开导航</a>` : ''}
+                <img id="route-map-image" src="${refreshedMapUrl}" data-base-src="${mapUrl}" alt="路线地图" style="width:100%;">
+                <div id="route-map-error" class="map-placeholder" style="display:none;">
+                    <span>地图暂时没有加载出来</span>
+                    <button id="btn-retry-map" type="button" class="btn btn-outline btn-sm">重新加载</button>
+                </div>
+                ${navUrl ? `<a href="${navUrl}" target="_blank" rel="noopener" class="btn btn-primary btn-block" style="margin-top:8px;">🗺️ 在高德地图中打开导航</a>` : ''}
             </div>
         `;
     }
@@ -675,7 +720,7 @@ function renderRoute(data, hotelData, guideData, budgetLevel) {
                 <h3 style="margin-bottom:8px;">🌐 全网攻略推荐</h3>
                 <div class="guide-links">
                     ${guideData.guides.map(g => `
-                        <a href="${g.url}" target="_blank" class="guide-link">
+                        <a href="${g.url}" target="_blank" rel="noopener" class="guide-link" ${g.app_url ? `data-app-url="${escHtml(g.app_url)}" data-web-url="${escHtml(g.url)}"` : ''}>
                             <span class="guide-icon">${g.icon}</span>
                             <div class="guide-info">
                                 <div class="guide-name">${escHtml(g.platform)}</div>
@@ -698,6 +743,42 @@ function renderRoute(data, hotelData, guideData, budgetLevel) {
     `;
 
     routeResult.innerHTML = html;
+
+    const mapImage = $('#route-map-image');
+    const mapError = $('#route-map-error');
+    if (mapImage && mapError) {
+        mapImage.addEventListener('load', () => {
+            mapImage.style.display = 'block';
+            mapError.style.display = 'none';
+        });
+        mapImage.addEventListener('error', () => {
+            mapImage.style.display = 'none';
+            mapError.style.display = 'flex';
+        });
+        if (mapImage.complete) {
+            if (mapImage.naturalWidth > 0) {
+                mapImage.style.display = 'block';
+                mapError.style.display = 'none';
+            } else {
+                mapImage.style.display = 'none';
+                mapError.style.display = 'flex';
+            }
+        }
+        $('#btn-retry-map').addEventListener('click', () => {
+            mapError.style.display = 'none';
+            mapImage.style.display = 'block';
+            const separator = mapImage.dataset.baseSrc.includes('?') ? '&' : '?';
+            mapImage.src = `${mapImage.dataset.baseSrc}${separator}refresh=${Date.now()}`;
+        });
+    }
+
+    routeResult.querySelectorAll('.guide-link[data-app-url]').forEach(link => {
+        link.addEventListener('click', event => {
+            if (!isMobileBrowser()) return;
+            event.preventDefault();
+            openMobileAppWithFallback(link.dataset.appUrl, link.dataset.webUrl);
+        });
+    });
 
     // 保存按钮
     $('#btn-save-route').addEventListener('click', () => saveRoute());
@@ -740,6 +821,8 @@ function renderRoute(data, hotelData, guideData, budgetLevel) {
                     address: found.address || '',
                     rating: found.rating || '',
                     estimated_cost: found.ticket || 0,
+                    cost_confirmed: found.cost_confirmed || false,
+                    ticket_source: found.ticket_source || '',
                     location: found.location || '',
                     photo: '',
                 });

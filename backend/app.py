@@ -6,6 +6,7 @@
 import os
 import json
 import uuid
+import urllib.parse
 from datetime import datetime, timedelta
 from flask import Flask, request, jsonify, send_from_directory
 from flask_cors import CORS
@@ -110,28 +111,45 @@ KNOWN_PRICES = {
     "千岛湖": 130, "乌镇": 150, "周庄": 100, "宏村": 104,
     "龙门石窟": 90, "云冈石窟": 120, "大足石刻": 135,
     "都江堰": 80, "乐山大佛": 80, "三亚南山": 129, "天涯海角": 81,
+    "上海迪士尼": 475, "北京环球度假区": 528, "广州长隆野生动物世界": 300,
+    "上海野生动物园": 165, "北京动物园": 15, "成都大熊猫繁育研究基地": 55,
+    "三星堆博物馆": 72, "陕西历史博物馆": 0, "南京博物院": 0,
+    "上海博物馆": 0, "中国国家博物馆": 0, "苏州博物馆": 0,
+    "东方明珠": 199, "上海中心大厦": 180, "广州塔": 150,
+    "青城山": 80, "普陀山": 160, "五台山": 135, "武当山": 164,
+    "壶口瀑布": 100, "黄果树瀑布": 160, "德天跨国瀑布": 115,
+    "鼋头渚": 90, "瘦西湖": 100, "灵山胜境": 210, "牛首山": 98,
+    "明孝陵": 70, "中山陵": 0, "总统府": 35, "玄武湖": 0,
+    "杜甫草堂": 50, "武侯祠": 50, "金沙遗址博物馆": 70,
+    "青岛崂山": 90, "蓬莱阁": 100, "刘公岛": 122,
 }
 
 
-def estimate_ticket(attraction_name, attraction_type):
-    """获取景点门票：已知库 > 高德数据 > 类型估算"""
-    # 1. 已知价格库
-    for key, price in KNOWN_PRICES.items():
-        if key in attraction_name:
-            return price, True
+def estimate_ticket(attraction_name="", attraction_type=""):
+    """返回门票参考价、是否为已知价格、价格来源。
 
-    # 2. 免费类型启发（匹配 type 全字段，不是只看第一段）
-    free_types = ["公园", "广场", "街区", "步行街", "古镇", "老街",
-                  "博物馆", "纪念馆", "陈列馆", "展览馆", "海滩", "湖泊", "河流"]
-    if any(k in attraction_type for k in free_types):
-        return 0, True
+    高德 POI 的 biz_ext.cost 通常表示人均消费，并不等同景点门票，因此不在这里
+    当作票价。已知景点使用公开挂牌价参考；其余只给保守估算并明确标注。
+    """
+    attraction_name = attraction_name or ""
+    attraction_type = attraction_type or ""
+    # 1. 已知价格库
+    # 长名称优先，避免“长城”等短别名抢先匹配更具体的景点。
+    for key, price in sorted(KNOWN_PRICES.items(), key=lambda item: len(item[0]), reverse=True):
+        if key in attraction_name:
+            return price, True, "景区公开挂牌价参考"
+
+    # 2. 高可信免费场所名称。仅凭“博物馆/古镇”等类型不能断言免费。
+    free_name_cues = ["广场", "步行街", "商业街", "老街", "市民公园", "城市公园"]
+    if any(k in attraction_name for k in free_name_cues):
+        return 0, False, "通常免费，特殊展览或项目另计"
 
     # 3. 类型估算
     for key, (low, high) in TICKET_ESTIMATE.items():
         if key in attraction_type:
-            return max(0, round((low + high) / 2)), False
+            return max(0, round((low + high) / 2)), False, f"同类景点通常 ¥{low}~¥{high}"
 
-    return 0, False  # 未知默认参考价
+    return 0, False, "未查到可靠票价，请以景区官方信息为准"
 
 def stable_hash(s, min_val, max_val):
     """根据字符串生成稳定的哈希值，映射到 [min_val, max_val] 区间"""
@@ -234,6 +252,9 @@ def search_attractions():
 
         attractions = []
         for poi in data.get("pois", []):
+            ticket, ticket_confirmed, ticket_source = estimate_ticket(
+                poi.get("name", ""), poi.get("type", "")
+            )
             attraction = {
                 "id": poi.get("id"),
                 "name": poi.get("name"),
@@ -244,9 +265,9 @@ def search_attractions():
                 "photo": "",
                 "location": poi.get("location", ""),
                 "distance": poi.get("distance", ""),
-                "estimated_cost": estimate_ticket(
-                    poi.get("type", "")
-                ),
+                "estimated_cost": ticket,
+                "cost_confirmed": ticket_confirmed,
+                "ticket_source": ticket_source,
             }
             # 处理照片
             photos = poi.get("photos", [])
@@ -308,6 +329,9 @@ def attraction_detail():
         biz = poi.get("biz_ext", {}) or {}
         deep = poi.get("deep_info", {}) or {}
 
+        ticket, ticket_confirmed, ticket_source = estimate_ticket(
+            poi.get("name", ""), poi.get("type", "")
+        )
         detail = {
             "id": poi.get("id"),
             "name": poi.get("name"),
@@ -315,7 +339,10 @@ def attraction_detail():
             "city": poi.get("cityname", ""),
             "type": poi.get("type", "").split(";")[:3],
             "rating": biz.get("rating", ""),
-            "cost": biz.get("cost", ""),
+            "cost": ticket,
+            "estimated_cost": ticket,
+            "cost_confirmed": ticket_confirmed,
+            "ticket_source": ticket_source,
             "open_time": biz.get("open_time", ""),
             "phone": poi.get("tel", "") or biz.get("tel", ""),
             "website": poi.get("website", ""),
@@ -526,17 +553,8 @@ def search_city_attractions(city, key, whitelist_names, whitelist_types, blackli
                 if poi_type in whitelist_types:
                     boost += 5
 
-                # 门票：高德数据 > 已知价格库 > 类型估算
-                biz_cost = (poi.get("biz_ext", {}) or {}).get("cost", "")
-                try:
-                    real_cost = float(biz_cost) if biz_cost else 0
-                except (ValueError, TypeError):
-                    real_cost = 0
-
-                if real_cost > 0:
-                    cost, confirmed = int(real_cost), True
-                else:
-                    cost, confirmed = estimate_ticket(poi_name, poi_type)
+                # biz_ext.cost 是 POI 人均消费，不是景点门票，不能直接采用。
+                cost, confirmed, ticket_source = estimate_ticket(poi_name, poi_type)
 
                 all_attractions.append({
                     "id": poi.get("id"),
@@ -548,6 +566,7 @@ def search_city_attractions(city, key, whitelist_names, whitelist_types, blackli
                     "rating": poi.get("biz_ext", {}).get("rating", ""),
                     "cost": cost,
                     "cost_confirmed": confirmed,
+                    "ticket_source": ticket_source,
                     "boost": boost,
                 })
     except Exception:
@@ -737,6 +756,7 @@ def generate_route():
                     {"id": a["id"], "name": a["name"], "type": a["type"],
                      "address": a["address"], "ticket": a["cost"],
                      "cost_confirmed": a.get("cost_confirmed", False),
+                     "ticket_source": a.get("ticket_source", ""),
                      "location": a["location"], "rating": a["rating"]}
                     for a in day_attrs
                 ],
@@ -781,25 +801,12 @@ def generate_route():
         "intercity_transports": intercity_transports,
     }
 
-    # 地图 URL —— 编号标注 + 简洁路径
-    map_url = ""
+    # 地图图片由本站后端按坐标生成，API Key 不下发到浏览器。
+    map_image_url = ""
     nav_url = ""
     if all_locations:
-        loc_str = "|".join(all_locations[:10])
-        # 编号标注（最多 10 个）
-        labels = []
-        for i, loc in enumerate(all_locations[:10]):
-            labels.append(f"mid,0xFF6B35,{i+1}:{loc}")
-        marker_str = "|".join(labels)
-        # 简单路径线
-        path_str = "3:0x3366FF:0.7:::" + ";".join(all_locations[:10])
-        map_url = (
-            f"https://restapi.amap.com/v3/staticmap?key={key}"
-            f"&locations={loc_str}"
-            f"&size=600*300&scale=2&zoom={'7' if is_multi_city else '12'}"
-            f"&markers={marker_str}"
-            f"&path={path_str}"
-        )
+        points = "|".join(all_locations[:10])
+        map_image_url = "/api/map-image?points=" + urllib.parse.quote(points, safe="")
         # 高德导航链接
         if len(all_locations) >= 2:
             nav_url = f"https://uri.amap.com/navigation?from={all_locations[0]},起点&to={all_locations[-1]},终点&mode=car"
@@ -810,7 +817,8 @@ def generate_route():
         "summary": summary,
         "itinerary": itinerary,
         "hotel_level": hotel_level,
-        "map_url": map_url,
+        "map_url": map_image_url,
+        "map_image_url": map_image_url,
         "nav_url": nav_url,
         "blacklist_filtered": 0,
     })
@@ -819,15 +827,44 @@ def generate_route():
 # ----- 地图图片代理 -----
 @app.route("/api/map-image")
 def map_image():
-    """代理高德静态地图（避免浏览器 Referer 限制）"""
-    url = request.args.get("url", "")
-    if not url:
-        return "missing url", 400
+    """按路线坐标生成并代理高德静态地图。"""
+    raw_points = request.args.get("points", "")
+    points = []
+    for value in raw_points.split("|")[:10]:
+        try:
+            lng_text, lat_text = value.split(",", 1)
+            lng, lat = float(lng_text), float(lat_text)
+            if 73 <= lng <= 136 and 3 <= lat <= 54:
+                points.append(f"{lng:.6f},{lat:.6f}")
+        except (ValueError, TypeError):
+            continue
+    if not points:
+        return jsonify({"error": "缺少有效的地图坐标"}), 400
+
+    key = get_amap_key()
+    if not key:
+        return jsonify({"error": "请先设置高德地图 API Key"}), 500
+
+    marker_groups = [f"mid,0xFF6B35,{i + 1}:{point}" for i, point in enumerate(points)]
+    params = {
+        "key": key,
+        "size": "750*360",
+        "scale": 2,
+        "markers": "|".join(marker_groups),
+    }
+    if len(points) > 1:
+        params["paths"] = "5,0x3366FF,0.85,,:" + ";".join(points)
     try:
-        resp = requests.get(url, timeout=15)
-        return resp.content, resp.status_code, {"Content-Type": "image/png"}
-    except Exception:
-        return "failed", 500
+        resp = requests.get("https://restapi.amap.com/v3/staticmap", params=params, timeout=15)
+        content_type = resp.headers.get("Content-Type", "").split(";", 1)[0].lower()
+        if not resp.ok or not content_type.startswith("image/"):
+            return jsonify({"error": "地图服务暂时不可用，请稍后重试"}), 502
+        return resp.content, 200, {
+            "Content-Type": content_type,
+            "Cache-Control": "no-store, max-age=0",
+        }
+    except requests.exceptions.RequestException:
+        return jsonify({"error": "地图请求超时，请稍后重试"}), 504
 
 
 # ----- 真实高铁票价计算 -----
@@ -907,15 +944,14 @@ def travel_guide():
     if not city:
         return jsonify({"error": "请输入城市名称"}), 400
 
-    encoded = city
-    import urllib.parse
     q = urllib.parse.quote(f"{city} 旅游攻略")
     guides = [
         {
             "platform": "小红书",
             "icon": "📕",
             "url": f"https://www.xiaohongshu.com/search_result?keyword={q}&source=web_search_result_notes",
-            "desc": "真实游客分享，图文并茂"
+            "app_url": f"xhsdiscover://search/result?keyword={q}&target_search=notes&source=deeplink",
+            "desc": "手机优先打开 App，未安装则打开网页版"
         },
         {
             "platform": "知乎",

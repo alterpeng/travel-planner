@@ -1135,6 +1135,9 @@ html, body {
     text-align: center;
     color: var(--text-light);
     font-size: var(--font-sm);
+    flex-direction: column;
+    align-items: center;
+    gap: 10px;
 }
 
 /* ========== Checkbox ========== */
