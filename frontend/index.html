@@ -40,24 +40,28 @@
             </div>
             <div class="form-row">
                 <div class="form-group flex-1">
+                    <label class="label">出行日期</label>
+                    <input type="date" id="route-date" class="input">
+                </div>
+                <div class="form-group flex-1">
                     <label class="label">出行天数</label>
                     <input type="number" id="route-days" placeholder="留空自动推荐" class="input" min="1" max="30">
                 </div>
+            </div>
+            <div class="form-row">
                 <div class="form-group flex-1">
                     <label class="label">总预算（元）</label>
                     <input type="number" id="route-budget" placeholder="如：3000" class="input" min="0" step="100">
+                </div>
+                <div class="form-group flex-1">
+                    <label class="label">出发城市</label>
+                    <input type="text" id="route-departure" placeholder="如：北京" class="input">
                 </div>
             </div>
             <div class="budget-presets">
                 <button class="budget-preset budget-economy" data-budget="1500" data-label="经济型">💰 经济型 ¥1500</button>
                 <button class="budget-preset budget-comfort" data-budget="3000" data-label="舒适型">💎 舒适型 ¥3000</button>
                 <button class="budget-preset budget-luxury" data-budget="6000" data-label="豪华型">👑 豪华型 ¥6000</button>
-            </div>
-            <div class="form-group">
-                <label class="label">出发城市</label>
-                <div class="input-with-tag">
-                    <input type="text" id="route-departure" placeholder="如：北京" class="input">
-                </div>
             </div>
             <button id="btn-generate" class="btn btn-accent btn-block">✨ 生成路线</button>
 

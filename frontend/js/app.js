@@ -21,6 +21,7 @@ const searchCity = $('#search-city');
 const btnSearch = $('#btn-search');
 const searchResults = $('#search-results');
 const routeDestination = $('#route-destination');
+const routeDate = $('#route-date');
 const routeDays = $('#route-days');
 const routeBudget = $('#route-budget');
 const routeDeparture = $('#route-departure');
@@ -472,6 +473,7 @@ btnGenerate.addEventListener('click', async () => {
     showLoading();
     try {
         const body = { destination };
+        if (routeDate.value) body.start_date = routeDate.value;
         if (days > 0) body.days = days;
         if (budget > 0) body.budget = budget;
         if (departure) body.departure = departure;
@@ -629,15 +631,16 @@ function renderRoute(data, hotelData, guideData, budgetLevel) {
     });
     html += '</div>';
 
-    // 地图（通过后端代理避免浏览器拦截）
+    // 地图（代理加载 + 直接打开链接双保险）
     const mapUrl = data.map_url || '';
     const navUrl = data.nav_url || '';
     if (mapUrl) {
         const proxyUrl = `/api/map-image?url=${encodeURIComponent(mapUrl)}`;
         html += `
             <div class="map-container" style="margin-top:16px;">
-                <h3 style="margin-bottom:8px;">🗺️ 路线地图（编号对应上方景点）</h3>
-                <img src="${proxyUrl}" alt="路线地图" style="width:100%;" onerror="this.insertAdjacentHTML('afterend','<p style=color:#999;text-align:center;padding:12px>地图加载失败，请刷新重试</p>');this.style.display='none'">
+                <h3 style="margin-bottom:8px;">🗺️ 路线地图</h3>
+                <img src="${proxyUrl}" alt="路线地图" style="width:100%;" onerror="this.outerHTML='<a href=\\'${mapUrl}\\' target=\\'_blank\\' class=\\'btn btn-outline btn-block\\' style=\\'margin:12px 0\\'>🗺️ 点击查看路线地图（新窗口打开）</a>'">
+                <a href="${mapUrl}" target="_blank" class="link-sm" style="display:block;text-align:center;margin:6px 0;">📌 地图加载不出？点此直接打开</a>
                 ${navUrl ? `<a href="${navUrl}" target="_blank" class="btn btn-primary btn-block" style="margin-top:8px;">🗺️ 在高德地图中打开导航</a>` : ''}
             </div>
         `;

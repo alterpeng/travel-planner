@@ -87,12 +87,51 @@ TICKET_ESTIMATE = {
     "古建筑": (20, 100),
 }
 
-def estimate_ticket(attraction_type):
-    """估算景点门票价格"""
+# 已知价格景点库（免费 & 常见）
+KNOWN_PRICES = {
+    # 免费景点
+    "丽江古城": 0, "杭州西湖": 0, "西湖": 0, "南京夫子庙": 0, "夫子庙": 0,
+    "上海外滩": 0, "外滩": 0, "北京798艺术区": 0, "成都宽窄巷子": 0,
+    "重庆解放碑": 0, "解放碑": 0, "深圳湾公园": 0, "厦门环岛路": 0,
+    "大理古城": 0, "凤凰古城": 0, "平遥古城": 0, "桂林西街": 0,
+    "西安回民街": 0, "回民街": 0, "长沙橘子洲": 0, "橘子洲": 0,
+    "武汉户部巷": 0, "天津五大道": 0, "青岛栈桥": 0, "栈桥": 0,
+    "苏州平江路": 0, "平江路": 0, "杭州西湖风景名胜区": 0,
+    "四方街": 0, "大研花巷": 0, "束河古镇": 0, "白沙古镇": 0,
+    # 收费景点（常见票价）
+    "故宫": 60, "故宫博物院": 60, "颐和园": 30, "天坛": 15, "天坛公园": 15,
+    "八达岭长城": 40, "长城": 40, "兵马俑": 120, "秦始皇兵马俑": 120,
+    "莫高窟": 238, "布达拉宫": 200, "九寨沟": 169, "黄山": 190,
+    "张家界": 228, "泰山": 115, "华山": 160, "峨眉山": 160,
+    "拙政园": 80, "留园": 55, "虎丘": 70, "寒山寺": 20,
+    "灵隐寺": 75, "雷峰塔": 40, "岳麓书院": 40, "黄鹤楼": 70,
+    "滕王阁": 50, "岳阳楼": 70, "鼓浪屿": 30, "武夷山": 140,
+    "漓江": 215, "玉龙雪山": 130, "泸沽湖": 100, "稻城亚丁": 146,
+    "千岛湖": 130, "乌镇": 150, "周庄": 100, "宏村": 104,
+    "龙门石窟": 90, "云冈石窟": 120, "大足石刻": 135,
+    "都江堰": 80, "乐山大佛": 80, "三亚南山": 129, "天涯海角": 81,
+}
+
+
+def estimate_ticket(attraction_name, attraction_type):
+    """获取景点门票：已知库 > 高德数据 > 类型估算"""
+    # 1. 已知价格库
+    for key, price in KNOWN_PRICES.items():
+        if key in attraction_name:
+            return price, True
+
+    # 2. 免费类型启发（匹配 type 全字段，不是只看第一段）
+    free_types = ["公园", "广场", "街区", "步行街", "古镇", "老街",
+                  "博物馆", "纪念馆", "陈列馆", "展览馆", "海滩", "湖泊", "河流"]
+    if any(k in attraction_type for k in free_types):
+        return 0, True
+
+    # 3. 类型估算
     for key, (low, high) in TICKET_ESTIMATE.items():
         if key in attraction_type:
-            return round((low + high) / 2)
-    return 50  # 默认估算
+            return max(0, round((low + high) / 2)), False
+
+    return 0, False  # 未知默认参考价
 
 def stable_hash(s, min_val, max_val):
     """根据字符串生成稳定的哈希值，映射到 [min_val, max_val] 区间"""
@@ -200,7 +239,7 @@ def search_attractions():
                 "name": poi.get("name"),
                 "address": poi.get("address"),
                 "city": poi.get("cityname") or (city if city else ""),
-                "type": poi.get("type", "").split(";")[0] if poi.get("type") else "",
+                "type": poi.get("type", "")if poi.get("type") else "",
                 "rating": poi.get("biz_ext", {}).get("rating", ""),
                 "photo": "",
                 "location": poi.get("location", ""),
@@ -473,7 +512,7 @@ def search_city_attractions(city, key, whitelist_names, whitelist_types, blackli
         result = safe_request("https://restapi.amap.com/v3/place/text", params, timeout=15)
         if result.get("status") == "1":
             for poi in result.get("pois", []):
-                poi_type = poi.get("type", "").split(";")[0] if poi.get("type") else ""
+                poi_type = poi.get("type", "") if poi.get("type") else ""
                 poi_name = poi.get("name", "")
 
                 # 黑名单过滤
@@ -487,12 +526,17 @@ def search_city_attractions(city, key, whitelist_names, whitelist_types, blackli
                 if poi_type in whitelist_types:
                     boost += 5
 
-                # 真实票价：优先用高德 biz_ext.cost
+                # 门票：高德数据 > 已知价格库 > 类型估算
                 biz_cost = (poi.get("biz_ext", {}) or {}).get("cost", "")
                 try:
                     real_cost = float(biz_cost) if biz_cost else 0
                 except (ValueError, TypeError):
                     real_cost = 0
+
+                if real_cost > 0:
+                    cost, confirmed = int(real_cost), True
+                else:
+                    cost, confirmed = estimate_ticket(poi_name, poi_type)
 
                 all_attractions.append({
                     "id": poi.get("id"),
@@ -502,8 +546,8 @@ def search_city_attractions(city, key, whitelist_names, whitelist_types, blackli
                     "city": city,
                     "location": poi.get("location", ""),
                     "rating": poi.get("biz_ext", {}).get("rating", ""),
-                    "cost": int(real_cost) if real_cost > 0 else estimate_ticket(poi.get("type", "")),
-                    "cost_confirmed": real_cost > 0,  # 是否为真实价格
+                    "cost": cost,
+                    "cost_confirmed": confirmed,
                     "boost": boost,
                 })
     except Exception:
@@ -552,6 +596,12 @@ def generate_route():
     days_input = data.get("days")
     budget = data.get("budget", 0) or 0
     departure = data.get("departure", "").strip()
+    start_date_str = data.get("start_date", "").strip()
+    # 使用用户选择的日期，否则默认今天
+    try:
+        trip_start = datetime.strptime(start_date_str, "%Y-%m-%d") if start_date_str else datetime.now()
+    except ValueError:
+        trip_start = datetime.now()
 
     if not destination:
         return jsonify({"error": "请输入目的地城市"}), 400
@@ -664,7 +714,7 @@ def generate_route():
             day_ticket = sum(a["cost"] for a in day_attrs)
             day_counter += 1
             day_cost = hotel_cost + food_cost + transport_inner + day_ticket
-            day_date = (datetime.now() + timedelta(days=day_counter - 1)).strftime("%Y-%m-%d")
+            day_date = (trip_start + timedelta(days=day_counter - 1)).strftime("%Y-%m-%d")
             day_weather = weather_fc.get(day_date, {})
             for a in day_attrs:
                 if a.get("location"):
@@ -673,7 +723,7 @@ def generate_route():
             itinerary.append({
                 "type": "day",
                 "day": day_counter,
-                "date": (datetime.now() + timedelta(days=day_counter - 1)).strftime("%m月%d日"),
+                "date": (trip_start + timedelta(days=day_counter - 1)).strftime("%m月%d日"),
                 "city": city,
                 "weather": {
                     "weather_day": day_weather.get("weather_day", ""),
@@ -858,35 +908,37 @@ def travel_guide():
         return jsonify({"error": "请输入城市名称"}), 400
 
     encoded = city
+    import urllib.parse
+    q = urllib.parse.quote(f"{city} 旅游攻略")
     guides = [
         {
             "platform": "小红书",
             "icon": "📕",
-            "url": f"https://www.xiaohongshu.com/search_result?keyword={encoded}+旅游攻略",
+            "url": f"https://www.xiaohongshu.com/search_result?keyword={q}&source=web_search_result_notes",
             "desc": "真实游客分享，图文并茂"
         },
         {
             "platform": "知乎",
             "icon": "💡",
-            "url": f"https://www.zhihu.com/search?type=content&q={encoded}+旅游",
+            "url": f"https://www.zhihu.com/search?type=content&q={q}",
             "desc": "深度攻略，本地人推荐"
         },
         {
             "platform": "百度",
             "icon": "🔍",
-            "url": f"https://www.baidu.com/s?wd={encoded}+旅游攻略",
-            "desc": "综合搜索，应有尽有"
+            "url": f"https://m.baidu.com/s?word={q}",
+            "desc": "综合搜索，应有尽有（手机版）"
         },
         {
             "platform": "马蜂窝",
             "icon": "🐝",
-            "url": f"https://www.mafengwo.cn/search/q.php?q={encoded}",
-            "desc": "专业旅游攻略平台"
+            "url": f"https://m.mafengwo.cn/s/s.php?q={q}",
+            "desc": "专业旅游攻略（手机版）"
         },
         {
             "platform": "抖音",
             "icon": "🎵",
-            "url": f"https://www.douyin.com/search/{encoded}+旅游",
+            "url": f"https://www.douyin.com/search/{q}?type=general",
             "desc": "短视频看景点实况"
         },
     ]
