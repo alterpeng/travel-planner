@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>🧳 旅游助手</title>
+    <link rel="stylesheet" href="css/style.css">
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🧳</text></svg>">
+</head>
+<body>
+
+<!-- ========== 顶部标题栏 ========== -->
+<header class="header">
+    <h1>🧳 旅游助手</h1>
+    <span class="header-sub">家庭出行好帮手</span>
+</header>
+
+<!-- ========== 主内容区 ========== -->
+<main class="main-content">
+
+    <!-- ===== 首页 ===== -->
+    <section id="tab-home" class="tab-page active">
+        <!-- 搜索景点 -->
+        <div class="card">
+            <h3 class="card-title">🔍 搜索景点</h3>
+            <div class="search-row">
+                <input type="text" id="search-keyword" placeholder="景点名称，如"故宫"" class="input">
+                <input type="text" id="search-city" placeholder="城市（可选）" class="input input-sm">
+                <button id="btn-search" class="btn btn-primary">搜索</button>
+            </div>
+            <div id="search-results" class="results-list"></div>
+        </div>
+
+        <!-- 生成路线 -->
+        <div class="card">
+            <h3 class="card-title">🗺️ 生成旅行路线</h3>
+            <div class="form-group">
+                <label class="label">目的地城市 <span class="required">*</span></label>
+                <input type="text" id="route-destination" placeholder="如：杭州" class="input">
+            </div>
+            <div class="form-row">
+                <div class="form-group flex-1">
+                    <label class="label">出行天数</label>
+                    <input type="number" id="route-days" placeholder="留空自动推荐" class="input" min="1" max="30">
+                </div>
+                <div class="form-group flex-1">
+                    <label class="label">总预算（元）</label>
+                    <input type="number" id="route-budget" placeholder="如：3000" class="input" min="0" step="100">
+                </div>
+            </div>
+            <div class="form-group">
+                <label class="label">出发城市</label>
+                <div class="input-with-tag">
+                    <input type="text" id="route-departure" placeholder="如：北京" class="input">
+                </div>
+            </div>
+            <button id="btn-generate" class="btn btn-accent btn-block">✨ 生成路线</button>
+
+            <div id="route-result" class="route-result"></div>
+        </div>
+    </section>
+
+    <!-- ===== 天气 ===== -->
+    <section id="tab-weather" class="tab-page">
+        <div class="card">
+            <h3 class="card-title">🌤️ 查询天气</h3>
+            <div class="search-row">
+                <input type="text" id="weather-city" placeholder="输入城市名称" class="input">
+                <button id="btn-weather" class="btn btn-primary">查询</button>
+            </div>
+            <div id="weather-result" class="weather-result"></div>
+        </div>
+    </section>
+
+    <!-- ===== 偏好 ===== -->
+    <section id="tab-preferences" class="tab-page">
+        <!-- 添加偏好 -->
+        <div class="card">
+            <h3 class="card-title">➕ 添加偏好</h3>
+            <div class="form-group">
+                <label class="label">名称（景点名或类型）</label>
+                <input type="text" id="pref-name" placeholder="如：故宫 / 购物中心" class="input">
+            </div>
+            <div class="form-group">
+                <label class="label">类型分类（可选）</label>
+                <input type="text" id="pref-type" placeholder="如：古建筑 / 购物" class="input">
+            </div>
+            <div class="btn-row">
+                <button id="btn-add-whitelist" class="btn btn-success flex-1">👍 加入白名单</button>
+                <button id="btn-add-blacklist" class="btn btn-danger flex-1">👎 加入黑名单</button>
+            </div>
+        </div>
+
+        <!-- 白名单 -->
+        <div class="card card-success">
+            <h3 class="card-title">👍 白名单（优先推荐）</h3>
+            <div id="whitelist-items" class="pref-list">
+                <p class="empty-hint">暂无数据</p>
+            </div>
+        </div>
+
+        <!-- 黑名单 -->
+        <div class="card card-danger">
+            <h3 class="card-title">👎 黑名单（自动过滤）</h3>
+            <div id="blacklist-items" class="pref-list">
+                <p class="empty-hint">暂无数据</p>
+            </div>
+        </div>
+    </section>
+
+    <!-- ===== 设置 ===== -->
+    <section id="tab-settings" class="tab-page">
+        <div class="card">
+            <h3 class="card-title">🏙️ 默认出发城市</h3>
+            <div class="search-row">
+                <input type="text" id="setting-city" placeholder="如：北京" class="input">
+                <button id="btn-save-city" class="btn btn-primary">保存</button>
+            </div>
+        </div>
+
+        <div class="card">
+            <h3 class="card-title">🔑 API 密钥设置</h3>
+            <p class="card-desc">需要去对应平台免费注册获取</p>
+            <div class="form-group">
+                <label class="label">高德地图 API Key</label>
+                <div class="api-key-row">
+                    <input type="password" id="setting-amap-key" placeholder="输入高德 Key" class="input">
+                    <button class="btn btn-sm btn-outline toggle-key" data-target="setting-amap-key">👁️</button>
+                </div>
+                <a href="https://lbs.amap.com/" target="_blank" class="link-sm">👉 去高德开放平台注册（免费）</a>
+            </div>
+            <button id="btn-save-keys" class="btn btn-primary btn-block">💾 保存密钥</button>
+        </div>
+
+        <div class="card">
+            <h3 class="card-title">ℹ️ 关于</h3>
+            <p class="card-desc">旅游助手 v1.0 — 为家人打造的智能旅游规划工具</p>
+            <p class="card-desc">数据来源：高德地图 + 和风天气</p>
+        </div>
+    </section>
+
+</main>
+
+<!-- ========== 底部导航 ========== -->
+<nav class="bottom-nav">
+    <div class="nav-item active" data-tab="tab-home">
+        <span class="nav-icon">🏠</span>
+        <span class="nav-label">首页</span>
+    </div>
+    <div class="nav-item" data-tab="tab-weather">
+        <span class="nav-icon">🌤️</span>
+        <span class="nav-label">天气</span>
+    </div>
+    <div class="nav-item" data-tab="tab-preferences">
+        <span class="nav-icon">⭐</span>
+        <span class="nav-label">偏好</span>
+    </div>
+    <div class="nav-item" data-tab="tab-settings">
+        <span class="nav-icon">⚙️</span>
+        <span class="nav-label">设置</span>
+    </div>
+</nav>
+
+<!-- ========== Toast 消息 ========== -->
+<div id="toast" class="toast"></div>
+
+<!-- ========== 加载遮罩 ========== -->
+<div id="loading" class="loading-overlay" style="display:none;">
+    <div class="loading-spinner"></div>
+    <p class="loading-text">加载中...</p>
+</div>
+
+<script src="js/app.js"></script>
+</body>
+</html>

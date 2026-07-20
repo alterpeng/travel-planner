@@ -1,0 +1,5 @@
+__pycache__/
+*.pyc
+.env
+backend/data/config.json
+backend/data/preferences.json

@@ -1,0 +1,12 @@
+# Render 部署配置
+services:
+  - type: web
+    name: travel-planner-api
+    env: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn app:app --bind 0.0.0.0:$PORT
+    envVars:
+      - key: FLASK_ENV
+        value: production
+      - key: AMAP_KEY
+        sync: false   # 在 Render Dashboard 手动设置
