@@ -24,8 +24,24 @@ const routeDestination = $('#route-destination');
 const routeDays = $('#route-days');
 const routeBudget = $('#route-budget');
 const routeDeparture = $('#route-departure');
+const budgetPresets = $$('.budget-preset');
 const btnGenerate = $('#btn-generate');
 const routeResult = $('#route-result');
+
+// 详情弹窗
+const detailModal = $('#detail-modal');
+const detailClose = $('#detail-close');
+const detailName = $('#detail-name');
+const detailRating = $('#detail-rating');
+const detailCost = $('#detail-cost');
+const detailTime = $('#detail-time');
+const detailPhone = $('#detail-phone');
+const detailAddress = $('#detail-address');
+const detailType = $('#detail-type');
+const detailPhotos = $('#detail-photos');
+const detailLike = $('#detail-like');
+const detailDislike = $('#detail-dislike');
+let currentDetailAttraction = null;
 
 // 天气
 const weatherCity = $('#weather-city');
@@ -127,6 +143,103 @@ navItems.forEach(item => {
     });
 });
 
+// ========== 预算预设 ==========
+budgetPresets.forEach(btn => {
+    btn.addEventListener('click', () => {
+        budgetPresets.forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        const budget = btn.dataset.budget;
+        routeBudget.value = budget;
+        // 根据预算自动推荐天数
+        if (budget === '1500') routeDays.value = '2';
+        else if (budget === '3000') routeDays.value = '3';
+        else routeDays.value = '4';
+        // 聚焦到目的地输入框
+        routeDestination.focus();
+    });
+});
+
+// ========== 景点详情弹窗 ==========
+function openDetail(attraction) {
+    currentDetailAttraction = attraction;
+    detailName.textContent = attraction.name;
+    detailRating.textContent = attraction.rating || '暂无';
+    detailCost.textContent = attraction.estimated_cost ? `约 ¥${attraction.estimated_cost}` : '暂无';
+    detailTime.textContent = '加载中...';
+    detailPhone.textContent = '加载中...';
+    detailAddress.textContent = attraction.address || '';
+    detailType.textContent = attraction.type || '';
+    detailPhotos.innerHTML = attraction.photo
+        ? `<img src="${attraction.photo}" alt="${attraction.name}" onerror="this.style.display='none'">`
+        : '<p style="color:#999;text-align:center;padding:20px;">暂无照片</p>';
+    detailModal.style.display = 'flex';
+
+    // 异步加载详情
+    const params = `id=${encodeURIComponent(attraction.id)}`;
+    api('GET', `/api/attractions/detail?${params}`)
+        .then(d => {
+            detailTime.textContent = d.open_time || '暂无';
+            detailPhone.textContent = d.phone || '暂无';
+            if (d.photos && d.photos.length > 0) {
+                detailPhotos.innerHTML = d.photos.map(url =>
+                    `<img src="${url}" alt="" onerror="this.style.display='none'">`
+                ).join('');
+            }
+            currentDetailAttraction = { ...currentDetailAttraction, ...d };
+        })
+        .catch(() => {
+            detailTime.textContent = '暂无';
+            detailPhone.textContent = '暂无';
+        });
+}
+
+function closeDetail() {
+    detailModal.style.display = 'none';
+    currentDetailAttraction = null;
+}
+
+detailClose.addEventListener('click', closeDetail);
+detailModal.addEventListener('click', (e) => {
+    if (e.target === detailModal) closeDetail();
+});
+
+// 弹窗中添加到偏好
+detailLike.addEventListener('click', async () => {
+    if (!currentDetailAttraction) return;
+    try {
+        await api('POST', '/api/preferences', {
+            name: currentDetailAttraction.name,
+            type: currentDetailAttraction.type || '',
+            list: 'whitelist',
+        });
+        showToast('已加入白名单！', 'success');
+        closeDetail();
+    } catch (err) {
+        showToast(err.message, 'error');
+    }
+});
+
+detailDislike.addEventListener('click', async () => {
+    if (!currentDetailAttraction) return;
+    try {
+        await api('POST', '/api/preferences', {
+            name: currentDetailAttraction.name,
+            type: currentDetailAttraction.type || '',
+            list: 'blacklist',
+        });
+        showToast('已加入黑名单！', 'success');
+        closeDetail();
+    } catch (err) {
+        showToast(err.message, 'error');
+    }
+});
+
+// ========== 地图生成 ==========
+function generateMapImage(mapUrlFromServer) {
+    // 地图 URL 由后端生成（保护 API Key 安全）
+    return mapUrlFromServer || '';
+}
+
 // ========== 首页 - 搜索景点 ==========
 btnSearch.addEventListener('click', async () => {
     const keyword = searchKeyword.value.trim();
@@ -164,9 +277,9 @@ function renderSearchResults(attractions) {
         searchResults.innerHTML = '<p class="empty-hint">暂无结果</p>';
         return;
     }
-    searchResults.innerHTML = attractions.map(a => `
-        <div class="result-item">
-            <div class="result-photo">${a.photo ? `<img src="${a.photo}" alt="${a.name}" style="width:100%;height:100%;object-fit:cover;border-radius:8px;">` : '🏞️'}</div>
+    searchResults.innerHTML = attractions.map((a, i) => `
+        <div class="result-item" data-attraction-index="${i}">
+            <div class="result-photo">${a.photo ? `<img src="${a.photo}" alt="${escHtml(a.name)}" style="width:100%;height:100%;object-fit:cover;border-radius:8px;">` : '🏞️'}</div>
             <div class="result-info">
                 <div class="result-name">${escHtml(a.name)}</div>
                 ${a.type ? `<span class="result-type">${escHtml(a.type)}</span>` : ''}
@@ -178,6 +291,14 @@ function renderSearchResults(attractions) {
             </div>
         </div>
     `).join('');
+
+    // 点击打开详情弹窗
+    searchResults.querySelectorAll('.result-item').forEach(item => {
+        item.addEventListener('click', () => {
+            const idx = parseInt(item.dataset.attractionIndex);
+            openDetail(attractions[idx]);
+        });
+    });
 }
 
 function escHtml(str) {
@@ -214,7 +335,15 @@ btnGenerate.addEventListener('click', async () => {
         if (departure) body.departure = departure;
 
         const data = await api('POST', '/api/route/generate', body);
-        renderRoute(data);
+
+        // 同时加载酒店推荐
+        let hotelData = null;
+        const budgetLevel = budget <= 2000 ? 'budget' : budget <= 5000 ? 'comfort' : 'luxury';
+        try {
+            hotelData = await api('GET', `/api/hotels?city=${encodeURIComponent(destination)}&budget_level=${budgetLevel}`);
+        } catch (e) { /* hotel load fails silently */ }
+
+        renderRoute(data, hotelData, budgetLevel);
     } catch (err) {
         showToast(err.message, 'error');
         routeResult.innerHTML = '';
@@ -223,7 +352,7 @@ btnGenerate.addEventListener('click', async () => {
     }
 });
 
-function renderRoute(data) {
+function renderRoute(data, hotelData, budgetLevel) {
     const { summary, itinerary, hotel_level, unused_attractions, blacklist_filtered } = data;
 
     let html = '';
@@ -265,7 +394,7 @@ function renderRoute(data) {
                 </div>
                 <div class="day-body">
                     ${day.attractions.map(a => `
-                        <div class="day-attraction">
+                        <div class="day-attraction clickable" data-id="${escHtml(a.id || a.name)}">
                             <span class="day-attr-name">🏛️ ${escHtml(a.name)}</span>
                             <span class="day-attr-tag">${escHtml(a.type)}</span>
                             <span class="day-attr-cost">门票 ¥${a.ticket}</span>
@@ -309,6 +438,39 @@ function renderRoute(data) {
         `;
     }
 
+    // 地图可视化（使用后端生成的 URL）
+    const mapUrl = data.map_url || '';
+    if (mapUrl) {
+        html += `
+            <div class="map-container" style="margin-top:16px;">
+                <h3 style="margin-bottom:8px;">🗺️ 路线地图</h3>
+                <img src="${mapUrl}" alt="路线地图" loading="lazy" onerror="this.parentElement.style.display='none'">
+            </div>
+        `;
+    }
+
+    // 酒店推荐
+    if (hotelData && hotelData.hotels && hotelData.hotels.length > 0) {
+        html += `
+            <div class="hotel-section">
+                <h3>🏨 附近酒店推荐 (${hotelData.budget_level === 'budget' ? '经济型' : hotelData.budget_level === 'luxury' ? '豪华型' : '舒适型'} · ${hotelData.price_range})</h3>
+                ${hotelData.hotels.slice(0, 5).map(h => `
+                    <div class="hotel-card">
+                        <div class="hotel-photo">${h.photo ? `<img src="${h.photo}" alt="" style="width:100%;height:100%;object-fit:cover;border-radius:8px;">` : '🏨'}</div>
+                        <div class="hotel-info">
+                            <div class="hotel-name">${escHtml(h.name)}</div>
+                            <div class="hotel-meta">📍 ${escHtml(h.address || '')} ${h.rating ? '⭐'+h.rating : ''}</div>
+                        </div>
+                        <div class="hotel-price">
+                            <div class="price-val">¥${h.estimated_price}</div>
+                            <div class="price-label">约/晚</div>
+                        </div>
+                    </div>
+                `).join('')}
+            </div>
+        `;
+    }
+
     routeResult.innerHTML = html;
 
     // 绑定反馈按钮事件
@@ -344,6 +506,27 @@ function renderRoute(data) {
 
             const label = action === 'like' ? '白名单' : '黑名单';
             showToast(`已加入${label}！`, 'success');
+        });
+    });
+
+    // 路线中景点点击查看详情
+    routeResult.querySelectorAll('.day-attraction.clickable').forEach(item => {
+        item.addEventListener('click', () => {
+            const attrId = item.dataset.id;
+            const allAttr = itinerary.flatMap(d => d.attractions);
+            const found = allAttr.find(a => (a.id || a.name) === attrId);
+            if (found) {
+                openDetail({
+                    id: found.id || '',
+                    name: found.name,
+                    type: found.type || '',
+                    address: found.address || '',
+                    rating: found.rating || '',
+                    estimated_cost: found.ticket || 0,
+                    location: found.location || '',
+                    photo: '',
+                });
+            }
         });
     });
 

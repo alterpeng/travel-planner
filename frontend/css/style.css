@@ -469,6 +469,18 @@ html, body {
     border-bottom: none;
 }
 
+.day-attraction.clickable {
+    cursor: pointer;
+    transition: background 0.15s;
+}
+
+.day-attraction.clickable:hover {
+    background: var(--bg-warm);
+    border-radius: 6px;
+    padding-left: 6px;
+    padding-right: 6px;
+}
+
 .day-attr-name {
     font-weight: 500;
     flex: 1;
@@ -846,4 +858,266 @@ html, body {
         transform: translateX(-50%);
         border-radius: 16px 16px 0 0;
     }
+}
+
+/* ========== 预算预设按钮 ========== */
+.budget-presets {
+    display: flex;
+    gap: 6px;
+    margin-bottom: 12px;
+}
+
+.budget-preset {
+    flex: 1;
+    padding: 8px 4px;
+    border: 2px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: white;
+    font-size: var(--font-sm);
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s;
+    text-align: center;
+}
+
+.budget-preset:active {
+    transform: scale(0.95);
+}
+
+.budget-economy.active {
+    background: #E8F5E9;
+    border-color: #4CAF50;
+    color: #2E7D32;
+}
+
+.budget-comfort.active {
+    background: #E3F2FD;
+    border-color: #2196F3;
+    color: #1565C0;
+}
+
+.budget-luxury.active {
+    background: #FFF3E0;
+    border-color: #FF9800;
+    color: #E65100;
+}
+
+/* ========== 景点详情弹窗 ========== */
+.modal-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 1000;
+    background: rgba(0,0,0,0.5);
+    display: flex;
+    align-items: flex-end;
+    justify-content: center;
+    animation: fadeIn 0.2s ease;
+}
+
+.modal-content {
+    background: white;
+    border-radius: 20px 20px 0 0;
+    width: 100%;
+    max-width: 500px;
+    max-height: 85vh;
+    overflow-y: auto;
+    animation: slideUp 0.3s ease;
+}
+
+@keyframes slideUp {
+    from { transform: translateY(100%); }
+    to { transform: translateY(0); }
+}
+
+.modal-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 16px 20px;
+    border-bottom: 1px solid var(--border-light);
+    position: sticky;
+    top: 0;
+    background: white;
+    z-index: 1;
+}
+
+.modal-header h2 {
+    font-size: var(--font-lg);
+    margin: 0;
+}
+
+.modal-close {
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    border: none;
+    background: var(--bg);
+    font-size: 18px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--text-light);
+}
+
+.modal-body {
+    padding: 16px 20px;
+}
+
+.detail-photos {
+    display: flex;
+    gap: 8px;
+    overflow-x: auto;
+    margin-bottom: 16px;
+    padding-bottom: 4px;
+}
+
+.detail-photos img {
+    width: 160px;
+    height: 120px;
+    object-fit: cover;
+    border-radius: var(--radius-sm);
+    flex-shrink: 0;
+}
+
+.detail-info-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+    margin-bottom: 16px;
+}
+
+.detail-info-item {
+    background: var(--bg);
+    padding: 10px 12px;
+    border-radius: var(--radius-sm);
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.detail-label {
+    font-size: var(--font-xs);
+    color: var(--text-lighter);
+}
+
+.detail-info-item span:last-child {
+    font-weight: 600;
+    font-size: var(--font-md);
+    color: var(--text);
+}
+
+.detail-section {
+    margin-bottom: 14px;
+}
+
+.detail-section h4 {
+    font-size: var(--font-sm);
+    color: var(--text-light);
+    margin-bottom: 4px;
+}
+
+.detail-section p {
+    font-size: var(--font-md);
+    color: var(--text);
+}
+
+.detail-actions {
+    display: flex;
+    gap: 8px;
+    margin-top: 20px;
+    padding-top: 16px;
+    border-top: 1px solid var(--border-light);
+}
+
+/* 搜索结果点击样式 */
+.result-item {
+    cursor: pointer;
+}
+
+/* ========== 酒店推荐卡片 ========== */
+.hotel-section {
+    margin-top: 16px;
+}
+
+.hotel-section h3 {
+    font-size: var(--font-md);
+    margin-bottom: 8px;
+    color: var(--text);
+}
+
+.hotel-card {
+    display: flex;
+    gap: 10px;
+    padding: 10px;
+    background: var(--bg);
+    border-radius: var(--radius-sm);
+    margin-bottom: 8px;
+    align-items: center;
+}
+
+.hotel-card .hotel-photo {
+    width: 64px;
+    height: 64px;
+    border-radius: 8px;
+    background: var(--bg-warm);
+    flex-shrink: 0;
+    object-fit: cover;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 28px;
+}
+
+.hotel-info {
+    flex: 1;
+    min-width: 0;
+}
+
+.hotel-name {
+    font-weight: 600;
+    font-size: var(--font-sm);
+    margin-bottom: 2px;
+}
+
+.hotel-meta {
+    font-size: var(--font-xs);
+    color: var(--text-light);
+}
+
+.hotel-price {
+    text-align: right;
+    flex-shrink: 0;
+}
+
+.hotel-price .price-val {
+    font-size: var(--font-lg);
+    font-weight: 700;
+    color: var(--primary-dark);
+}
+
+.hotel-price .price-label {
+    font-size: var(--font-xs);
+    color: var(--text-lighter);
+}
+
+/* ========== 地图容器 ========== */
+.map-container {
+    margin: 12px 0;
+    border-radius: var(--radius);
+    overflow: hidden;
+    border: 1px solid var(--border-light);
+}
+
+.map-container img {
+    width: 100%;
+    display: block;
+}
+
+.map-placeholder {
+    background: var(--bg);
+    padding: 20px;
+    text-align: center;
+    color: var(--text-light);
+    font-size: var(--font-sm);
 }

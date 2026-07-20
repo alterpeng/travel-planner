@@ -227,6 +227,147 @@ def search_attractions():
         return jsonify({"error": f"请求失败：{str(e)}"}), 500
 
 
+# ----- 景点详情 -----
+@app.route("/api/attractions/detail")
+def attraction_detail():
+    """
+    获取景点详情（营业时间、门票、评价等）
+    参数: id (高德POI ID), city (可选)
+    """
+    poi_id = request.args.get("id", "").strip()
+    city = request.args.get("city", "").strip()
+
+    if not poi_id:
+        return jsonify({"error": "缺少景点ID"}), 400
+
+    key = get_amap_key()
+    if not key:
+        return jsonify({"error": "请先设置高德地图 API Key"}), 500
+
+    try:
+        # 使用高德 POI 详情接口（通过搜索指定ID）
+        params = {
+            "key": key,
+            "id": poi_id,
+            "extensions": "all",
+        }
+        if city:
+            params["city"] = city
+
+        data = safe_request("https://restapi.amap.com/v3/place/detail", params, timeout=10)
+
+        if data.get("status") != "1" or not data.get("pois"):
+            return jsonify({"error": "未找到景点详情"}), 404
+
+        poi = data["pois"][0]
+        biz = poi.get("biz_ext", {}) or {}
+        deep = poi.get("deep_info", {}) or {}
+
+        detail = {
+            "id": poi.get("id"),
+            "name": poi.get("name"),
+            "address": poi.get("address"),
+            "city": poi.get("cityname", ""),
+            "type": poi.get("type", "").split(";")[:3],
+            "rating": biz.get("rating", ""),
+            "cost": biz.get("cost", ""),
+            "open_time": biz.get("open_time", ""),
+            "phone": poi.get("tel", "") or biz.get("tel", ""),
+            "website": poi.get("website", ""),
+            "photos": [p.get("url", "") for p in (poi.get("photos", [])[:8])],
+            "description": poi.get("business_area", "") or deep.get("intro", ""),
+        }
+
+        return jsonify(detail)
+
+    except requests.exceptions.Timeout:
+        return jsonify({"error": "请求超时，请重试"}), 504
+    except requests.exceptions.RequestException as e:
+        return jsonify({"error": f"请求失败：{str(e)}"}), 500
+
+
+# ----- 酒店推荐 -----
+@app.route("/api/hotels")
+def search_hotels():
+    """
+    搜索目的地附近酒店
+    参数: city (必填), budget_level (可选: budget/comfort/luxury)
+    """
+    city = request.args.get("city", "").strip()
+    level = request.args.get("budget_level", "comfort").strip()
+
+    if not city:
+        return jsonify({"error": "请输入城市名称"}), 400
+
+    key = get_amap_key()
+    if not key:
+        return jsonify({"error": "请先设置高德地图 API Key"}), 500
+
+    # 根据预算等级设置星级偏好
+    star_map = {
+        "budget": "二星及以下|三星级",
+        "comfort": "三星级|四星级",
+        "luxury": "四星级|五星级|豪华型",
+    }
+    cost_range = {
+        "budget": (100, 250),
+        "comfort": (250, 500),
+        "luxury": (500, 2000),
+    }
+
+    try:
+        params = {
+            "key": key,
+            "keywords": "酒店",
+            "city": city,
+            "types": "酒店|宾馆|旅馆|客栈",
+            "offset": 10,
+            "page": 1,
+            "extensions": "all",
+        }
+
+        data = safe_request("https://restapi.amap.com/v3/place/text", params, timeout=10)
+
+        if data.get("status") != "1":
+            return jsonify({"error": "酒店搜索失败"}), 500
+
+        low, high = cost_range.get(level, (200, 500))
+        hotels = []
+        for poi in data.get("pois", []):
+            biz = poi.get("biz_ext", {}) or {}
+            rating = biz.get("rating", "")
+            cost = biz.get("cost", "")
+
+            # 估算价格
+            try:
+                est_cost = float(cost) if cost else (low + high) // 2
+            except ValueError:
+                est_cost = (low + high) // 2
+
+            hotels.append({
+                "id": poi.get("id"),
+                "name": poi.get("name"),
+                "address": poi.get("address"),
+                "rating": rating,
+                "estimated_price": int(est_cost) if est_cost else (low + high) // 2,
+                "type": poi.get("type", "").split(";")[0],
+                "photo": (poi.get("photos", [{}])[0].get("url", "")) if poi.get("photos") else "",
+                "location": poi.get("location", ""),
+            })
+
+        return jsonify({
+            "city": city,
+            "budget_level": level,
+            "price_range": f"¥{low}~¥{high}",
+            "hotels": hotels,
+        })
+
+    except requests.exceptions.Timeout:
+        return jsonify({"error": "请求超时，请重试"}), 504
+    except requests.exceptions.RequestException as e:
+        return jsonify({"error": f"请求失败：{str(e)}"}), 500
+
+
 # ----- 天气查询 -----
 @app.route("/api/weather")
 def get_weather():
@@ -471,10 +612,13 @@ def generate_route():
             },
             "attractions": [
                 {
+                    "id": a["id"],
                     "name": a["name"],
                     "type": a["type"],
                     "address": a["address"],
                     "ticket": a["cost"],
+                    "location": a["location"],
+                    "rating": a["rating"],
                 }
                 for a in day_attrs
             ],
@@ -504,10 +648,25 @@ def generate_route():
         "budget_fit": "在预算范围内" if budget == 0 or total_cost <= budget else f"超出预算 ¥{total_cost - budget}",
     }
 
+    # 生成静态地图 URL
+    map_url = ""
+    locations = [a["location"] for a in used_attractions if a.get("location")]
+    if len(locations) >= 1:
+        loc_str = "|".join(locations[:10])
+        # 起点用特殊标记
+        first_loc = locations[0]
+        map_url = (
+            f"https://restapi.amap.com/v3/staticmap?key={key}"
+            f"&locations={loc_str}"
+            f"&size=800*300&scale=2&zoom=12"
+            f"&markers=mid,0xFF6B35,A:{first_loc}"
+        )
+
     return jsonify({
         "summary": summary,
         "itinerary": itinerary,
         "hotel_level": hotel_level,
+        "map_url": map_url,
         "unused_attractions": [
             {"name": a["name"], "type": a["type"]} for a in filtered[total_attractions_used:total_attractions_used + 5]
         ],
