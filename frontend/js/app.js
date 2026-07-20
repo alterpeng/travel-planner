@@ -299,7 +299,7 @@ async function loadSavedRoutes() {
                 try {
                     showLoading();
                     const data = await api('GET', `/api/routes/saved/${btn.dataset.id}`);
-                    renderRoute(data);
+                    renderRoute(data, null, null, 'comfort');
                     hideLoading();
                 } catch (err) {
                     showToast(err.message, 'error');
@@ -478,14 +478,18 @@ btnGenerate.addEventListener('click', async () => {
 
         const data = await api('POST', '/api/route/generate', body);
 
-        // 同时加载酒店推荐
+        // 同时加载酒店推荐和攻略链接
         let hotelData = null;
+        let guideData = null;
         const budgetLevel = budget <= 2000 ? 'budget' : budget <= 5000 ? 'comfort' : 'luxury';
         try {
             hotelData = await api('GET', `/api/hotels?city=${encodeURIComponent(destination)}&budget_level=${budgetLevel}`);
-        } catch (e) { /* hotel load fails silently */ }
+        } catch (e) { /* silent */ }
+        try {
+            guideData = await api('GET', `/api/guide?city=${encodeURIComponent(destination)}`);
+        } catch (e) { /* silent */ }
 
-        renderRoute(data, hotelData, budgetLevel);
+        renderRoute(data, hotelData, guideData, budgetLevel);
     } catch (err) {
         showToast(err.message, 'error');
         routeResult.innerHTML = '';
@@ -495,11 +499,15 @@ btnGenerate.addEventListener('click', async () => {
 });
 
 let currentHotelLevel = '';
+let originalCostBreakdown = null;
+let originalTotalCost = 0;
 
-function renderRoute(data, hotelData, budgetLevel) {
+function renderRoute(data, hotelData, guideData, budgetLevel) {
     currentRouteData = data;
     const { summary, itinerary, hotel_level } = data;
     currentHotelLevel = hotel_level;
+    originalCostBreakdown = { ...summary.cost_breakdown };
+    originalTotalCost = summary.total_estimated;
 
     let html = '';
 
@@ -628,7 +636,7 @@ function renderRoute(data, hotelData, budgetLevel) {
         html += `
             <div class="map-container" style="margin-top:16px;">
                 <h3 style="margin-bottom:8px;">🗺️ 路线地图（编号对应上方景点）</h3>
-                <img src="${mapUrl}" alt="路线地图" loading="lazy" style="width:100%;" onerror="this.style.display='none'">
+                <img src="${mapUrl}" alt="路线地图" style="width:100%;" onerror="this.insertAdjacentHTML('afterend','<p style=color:#999;text-align:center;padding:12px>地图加载失败，请刷新重试</p>');this.style.display='none'">
                 ${navUrl ? `<a href="${navUrl}" target="_blank" class="btn btn-primary btn-block" style="margin-top:8px;">🗺️ 在高德地图中打开导航</a>` : ''}
             </div>
         `;
@@ -652,6 +660,27 @@ function renderRoute(data, hotelData, budgetLevel) {
                         </div>
                     </div>
                 `).join('')}
+            </div>
+        `;
+    }
+
+    // 全网攻略推荐
+    if (guideData && guideData.guides && guideData.guides.length > 0) {
+        html += `
+            <div class="guide-section" style="margin-top:16px;">
+                <h3 style="margin-bottom:8px;">🌐 全网攻略推荐</h3>
+                <div class="guide-links">
+                    ${guideData.guides.map(g => `
+                        <a href="${g.url}" target="_blank" class="guide-link">
+                            <span class="guide-icon">${g.icon}</span>
+                            <div class="guide-info">
+                                <div class="guide-name">${escHtml(g.platform)}</div>
+                                <div class="guide-desc">${escHtml(g.desc)}</div>
+                            </div>
+                            <span class="guide-arrow">→</span>
+                        </a>
+                    `).join('')}
+                </div>
             </div>
         `;
     }
@@ -944,29 +973,31 @@ document.addEventListener('click', (e) => {
 
 // ========== 重算路线总费用 ==========
 function recalcRouteTotal() {
-    let total = 0;
-    let hotelTotal = 0;
-    routeResult.querySelectorAll('.day-footer').forEach(footer => {
-        const hotelSpan = footer.querySelector('.hotel-toggle');
-        const costSpans = footer.querySelectorAll('span:not(.hotel-toggle)');
-        if (hotelSpan) {
-            hotelTotal += parseInt(hotelSpan.dataset.currentCost || hotelSpan.dataset.cost || '0');
-        }
-        costSpans.forEach(s => {
-            const m = s.textContent.match(/¥(\d+)/);
-            if (m) total += parseInt(m[1]);
-        });
+    if (!originalCostBreakdown) return;
+
+    // 计算当前各天酒店费用
+    let currentHotelTotal = 0;
+    routeResult.querySelectorAll('.hotel-toggle').forEach(span => {
+        currentHotelTotal += parseInt(span.dataset.currentCost || span.dataset.cost || '0');
     });
-    // Update summary total
-    const summaryVal = routeResult.querySelector('.summary-val');
-    // Actually, just update the budget_fit and total in cost breakdown
-    const totalRow = routeResult.querySelector('.cost-row:last-child span:last-child');
-    if (totalRow) {
-        const intercityMatch = routeResult.innerHTML.match(/城际交通.*?¥(\d+)/);
-        const intercity = intercityMatch ? parseInt(intercityMatch[1]) : 0;
-        const newTotal = intercity + hotelTotal + total;
-        totalRow.textContent = `¥${newTotal}`;
-    }
+
+    // 新总费用 = 原总费用 - 原酒店费 + 当前酒店费
+    const oldHotel = originalCostBreakdown.hotel;
+    const newTotal = originalTotalCost - oldHotel + currentHotelTotal;
+
+    // 更新费用明细中的酒店和总计
+    const costRows = routeResult.querySelectorAll('.cost-row');
+    costRows.forEach(row => {
+        const label = row.querySelector('span:first-child');
+        const val = row.querySelector('span:last-child');
+        if (!label || !val) return;
+        if (label.textContent.includes('住宿')) {
+            val.textContent = `¥${currentHotelTotal}`;
+        }
+        if (label.textContent.includes('总计')) {
+            val.textContent = `¥${newTotal}`;
+        }
+    });
 }
 
 // ========== 初始加载 ==========

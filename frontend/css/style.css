@@ -1339,3 +1339,53 @@ html, body {
 .save-name-input {
     margin-bottom: 8px;
 }
+
+/* ========== 攻略推荐链接 ========== */
+.guide-links {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.guide-link {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 12px;
+    background: var(--bg);
+    border-radius: var(--radius-sm);
+    text-decoration: none;
+    color: var(--text);
+    transition: background 0.15s;
+    border: 1px solid var(--border-light);
+}
+
+.guide-link:hover {
+    background: var(--bg-warm);
+    border-color: var(--primary);
+}
+
+.guide-icon {
+    font-size: 24px;
+    flex-shrink: 0;
+}
+
+.guide-info {
+    flex: 1;
+    min-width: 0;
+}
+
+.guide-name {
+    font-weight: 600;
+    font-size: var(--font-sm);
+}
+
+.guide-desc {
+    font-size: var(--font-xs);
+    color: var(--text-light);
+}
+
+.guide-arrow {
+    color: var(--text-lighter);
+    font-size: 16px;
+}

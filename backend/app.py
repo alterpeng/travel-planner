@@ -755,33 +755,30 @@ def generate_route():
         "intercity_transports": intercity_transports,
     }
 
-    # 地图 URL —— 路径连线 + 编号标注
+    # 地图 URL —— 编号标注 + 简洁路径
     map_url = ""
     nav_url = ""
     if all_locations:
-        loc_str = "|".join(all_locations[:15])
-        # 编号标注：每个景点标序号
+        loc_str = "|".join(all_locations[:10])
+        # 编号标注（最多 10 个）
         labels = []
         for i, loc in enumerate(all_locations[:10]):
             labels.append(f"mid,0xFF6B35,{i+1}:{loc}")
         marker_str = "|".join(labels)
-        # 路径连线
-        path_str = "0x3366FF,0.7,0,0x3366FF33:" + ";".join(all_locations[:15])
+        # 简单路径线
+        path_str = "3:0x3366FF:0.7:::" + ";".join(all_locations[:10])
         map_url = (
             f"https://restapi.amap.com/v3/staticmap?key={key}"
             f"&locations={loc_str}"
-            f"&size=800*350&scale=2&zoom={'7' if is_multi_city else '12'}"
+            f"&size=600*300&scale=2&zoom={'7' if is_multi_city else '12'}"
             f"&markers={marker_str}"
             f"&path={path_str}"
         )
-        # 高德导航链接（浏览器打开）
+        # 高德导航链接
         if len(all_locations) >= 2:
-            nav_from = f"{all_locations[0]}"
-            nav_to = f"{all_locations[-1]}"
-            nav_url = f"https://uri.amap.com/navigation?from={nav_from},起点&to={nav_to},终点&mode=car"
+            nav_url = f"https://uri.amap.com/navigation?from={all_locations[0]},起点&to={all_locations[-1]},终点&mode=car"
             if len(all_locations) > 2:
-                via = ";".join(all_locations[1:-1][:5])
-                nav_url += f"&via={via}"
+                nav_url += "&via=" + ";".join(all_locations[1:-1][:5])
 
     return jsonify({
         "summary": summary,
@@ -791,6 +788,54 @@ def generate_route():
         "nav_url": nav_url,
         "blacklist_filtered": 0,
     })
+
+
+# ----- 攻略推荐 -----
+@app.route("/api/guide")
+def travel_guide():
+    """
+    全网旅游攻略搜索链接
+    参数: city (必填)
+    """
+    city = request.args.get("city", "").strip()
+    if not city:
+        return jsonify({"error": "请输入城市名称"}), 400
+
+    encoded = city
+    guides = [
+        {
+            "platform": "小红书",
+            "icon": "📕",
+            "url": f"https://www.xiaohongshu.com/search_result?keyword={encoded}+旅游攻略",
+            "desc": "真实游客分享，图文并茂"
+        },
+        {
+            "platform": "知乎",
+            "icon": "💡",
+            "url": f"https://www.zhihu.com/search?type=content&q={encoded}+旅游",
+            "desc": "深度攻略，本地人推荐"
+        },
+        {
+            "platform": "百度",
+            "icon": "🔍",
+            "url": f"https://www.baidu.com/s?wd={encoded}+旅游攻略",
+            "desc": "综合搜索，应有尽有"
+        },
+        {
+            "platform": "马蜂窝",
+            "icon": "🐝",
+            "url": f"https://www.mafengwo.cn/search/q.php?q={encoded}",
+            "desc": "专业旅游攻略平台"
+        },
+        {
+            "platform": "抖音",
+            "icon": "🎵",
+            "url": f"https://www.douyin.com/search/{encoded}+旅游",
+            "desc": "短视频看景点实况"
+        },
+    ]
+
+    return jsonify({"city": city, "guides": guides})
 
 
 # ----- 行程保存 -----
