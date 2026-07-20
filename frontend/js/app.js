@@ -628,7 +628,7 @@ function renderRoute(data, hotelData, budgetLevel) {
         html += `
             <div class="map-container" style="margin-top:16px;">
                 <h3 style="margin-bottom:8px;">🗺️ 路线地图（编号对应上方景点）</h3>
-                <img src="${mapUrl}" alt="路线地图" loading="lazy" onerror="this.parentElement.style.display='none'">
+                <img src="${mapUrl}" alt="路线地图" loading="lazy" style="width:100%;" onerror="this.style.display='none'">
                 ${navUrl ? `<a href="${navUrl}" target="_blank" class="btn btn-primary btn-block" style="margin-top:8px;">🗺️ 在高德地图中打开导航</a>` : ''}
             </div>
         `;
@@ -715,10 +715,11 @@ function renderRoute(data, hotelData, budgetLevel) {
     });
 
     // 酒店切换：点击 [不住] 切���当天酒店费用
-    routeResult.querySelectorAll('.hotel-toggle small').forEach(btn => {
-        btn.addEventListener('click', function(e) {
+    routeResult.onclick = function(e) {
+        const target = e.target;
+        if (target.tagName === 'SMALL' && target.parentElement.classList.contains('hotel-toggle')) {
             e.stopPropagation();
-            const span = this.parentElement;
+            const span = target.parentElement;
             const originalCost = parseInt(span.dataset.cost);
             const isOff = span.classList.toggle('hotel-off');
             if (isOff) {
@@ -730,8 +731,8 @@ function renderRoute(data, hotelData, budgetLevel) {
             }
             span.dataset.cost = originalCost.toString();
             recalcRouteTotal();
-        });
-    });
+        }
+    };
 
     routeResult.scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
