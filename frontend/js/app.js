@@ -494,8 +494,6 @@ btnGenerate.addEventListener('click', async () => {
     }
 });
 
-let currentRouteData = null;
-
 function renderRoute(data, hotelData, budgetLevel) {
     currentRouteData = data;
     const { summary, itinerary, hotel_level } = data;
